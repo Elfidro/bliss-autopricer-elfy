@@ -25,7 +25,7 @@ module.exports = function (app, config, configManager) {
       }
 
       const pollDataPath = path.resolve(
-        selectedBot.tf2autobotPath || selectedBot.tf2AutobotDir,
+        selectedBot.tf2autobotPath+"/files/" || selectedBot.tf2AutobotDir+"/files/",
         selectedBot.botDirectory || selectedBot.botTradingDir,
         'polldata.json'
       );
