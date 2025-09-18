@@ -243,6 +243,45 @@ module.exports = function (app) {
         '<button type="button" onclick="addOwnerRow()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">➕ Add Another Owner</button>';
       html += '</div>';
 
+      // WebSocket Relay Configuration Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">🔌 WebSocket Relay Configuration</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Configure connection to backpack.tf websocket relay server (allows multiple instances to share one connection)</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: flex; align-items: center; margin-bottom: 15px;">
+          <input type="checkbox" name="relay_enabled" ${config.websocketRelay?.enabled ? 'checked' : ''} 
+                 style="margin-right: 8px;">
+          <span style="font-weight: bold;">Enable Relay Mode</span>
+        </label>
+        <small style="color: #666;">Use relay server instead of direct backpack.tf connection</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Protocol:</label>
+        <select name="relay_protocol" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+          <option value="ws" ${(config.websocketRelay?.protocol || 'ws') === 'ws' ? 'selected' : ''}>ws (HTTP)</option>
+          <option value="wss" ${(config.websocketRelay?.protocol || 'ws') === 'wss' ? 'selected' : ''}>wss (HTTPS)</option>
+        </select>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Host:</label>
+        <input type="text" name="relay_host" value="${config.websocketRelay?.host || 'localhost'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">IP address or hostname of relay server</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Port:</label>
+        <input type="number" name="relay_port" value="${config.websocketRelay?.port || 7789}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" min="1" max="65535">
+        <small style="color: #666;">Port number of relay server (default: 7789)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
       // Price Settings Section (remove non-existent ones)
       html += '<div style="margin-bottom: 30px;">';
       html +=
@@ -391,6 +430,15 @@ module.exports = function (app) {
         .filter((id) => id && id.trim().length > 0)
         .map((id) => id.trim())
         .filter((id) => /^[0-9]{17}$/.test(id)); // Basic Steam ID validation
+
+      // Update websocket relay settings
+      if (!config.websocketRelay) {
+        config.websocketRelay = {};
+      }
+      config.websocketRelay.enabled = req.body.relay_enabled === 'on';
+      config.websocketRelay.protocol = req.body.relay_protocol || 'ws';
+      config.websocketRelay.host = req.body.relay_host || 'localhost';
+      config.websocketRelay.port = parseInt(req.body.relay_port) || 7789;
 
       // Update pricer config settings
       pricerConfig.port = parseInt(req.body.web_port) || 3000;

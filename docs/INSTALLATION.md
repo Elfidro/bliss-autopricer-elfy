@@ -190,6 +190,47 @@ export DB_USER=autopricer
 export DB_PASSWORD=your_password
 ```
 
+## 🔌 WebSocket Relay Setup (Optional)
+
+For multiple autopricer instances, you can configure a relay server to share websocket connections:
+
+### 1. Install Relay Server
+
+```bash
+git clone https://github.com/ "will be made public soon"
+cd backpack-tf-socket-relay
+npm install
+npm start  # Starts on port 7789 by default
+```
+
+### 2. Configure Autopricer for Relay
+
+Option A: **Web Interface** (Recommended)
+
+1. Visit `http://localhost:3000/settings`
+2. Navigate to "🔌 WebSocket Relay Configuration"
+3. Enable relay mode and configure:
+   - Protocol: `ws` or `wss`
+   - Host: `localhost` (or relay server IP)
+   - Port: `7789` (or your relay port)
+
+Option B: **Manual Configuration**
+
+```json
+{
+  "websocketRelay": {
+    "enabled": true,
+    "protocol": "ws",
+    "host": "localhost",
+    "port": 7789
+  }
+}
+```
+
+### 3. Restart Autopricer
+
+The autopricer will now connect through your relay server at `ws://localhost:7789/relay` instead of directly to backpack.tf.
+
 ## Next Steps
 
 - **[Multi-Bot Setup](MULTI-BOT.md)** - Configure multiple bots

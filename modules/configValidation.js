@@ -28,6 +28,12 @@ const DEFAULTS = {
     maxBuyIncrease: 0.1,
     maxSellDecrease: 0.1,
   },
+  websocketRelay: {
+    enabled: false,
+    host: 'localhost',
+    port: 7789,
+    protocol: 'ws',
+  },
 };
 
 function deepMerge(target, src) {

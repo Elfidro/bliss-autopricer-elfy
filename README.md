@@ -43,6 +43,7 @@ Visit the web interface at `http://localhost:3000` to manage your pricing!
 - **⚡ One-Command Setup**: Intelligent configuration wizard that finds your bots automatically
 - **🎯 Advanced Fallback System**: SCM pricing for items with insufficient listing data
 - **💾 Configuration Migration**: Automatically upgrades old configurations to the new multi-bot system
+- **🔌 WebSocket Relay Support**: Connect through internal relay server for multiple instance deployments
 
 ### 🙏 Attribution
 
@@ -142,6 +143,43 @@ npm install
 ```
 
 Your configuration files (`pricerConfig.json`, `files/`) will be preserved during updates.
+
+## 🔌 WebSocket Relay Configuration
+
+For deployments with multiple autopricer instances, you can use the [backpack-tf-socket-relay](https://github.com/OliverPerring/backpack-tf-socket-relay) to share a single websocket connection to backpack.tf.
+
+### Setup Relay Mode
+
+1. **Start your relay server** (default port 7789):
+
+   ```bash
+   # In your relay server directory
+   npm start
+   ```
+
+2. **Configure autopricer** via web interface at `/settings` or manually in `config.json`:
+
+   ```json
+   {
+     "websocketRelay": {
+       "enabled": true,
+       "protocol": "ws",
+       "host": "localhost",
+       "port": 7789
+     }
+   }
+   ```
+
+3. **Restart autopricer** to use relay connection
+
+The autopricer will connect to `ws://localhost:7789/relay` when relay mode is enabled.
+
+### Benefits of Relay Mode
+
+- **Multiple Instances**: Run several autopricing instances with one backpack.tf connection
+- **Reduced API Load**: Single websocket connection shared across all instances
+- **Better Reliability**: Centralized connection management with automatic failover
+- **Compliance**: Respects backpack.tf's single connection per API key limitation
 
 ## 🤝 Contributing
 

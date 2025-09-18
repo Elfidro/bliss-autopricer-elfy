@@ -133,7 +133,11 @@ function getBptfItemPrice(items, sku) {
   }
 }
 
-async function getAllPricedItemNamesWithEffects(external_pricelist, schemaManager, dbConnection = null) {
+async function getAllPricedItemNamesWithEffects(
+  external_pricelist,
+  schemaManager,
+  dbConnection = null
+) {
   const names = [];
   const qualities = schemaManager.schema.qualities || {};
   const qualitiesById = {};
@@ -157,7 +161,7 @@ async function getAllPricedItemNamesWithEffects(external_pricelist, schemaManage
         WHERE sku LIKE '%;kt-%'
       `;
       const result = await dbConnection.any(query);
-      
+
       // Build map of item name -> set of killstreak tiers
       for (const row of result) {
         const { name: itemName, sku } = row;
@@ -193,10 +197,10 @@ async function getAllPricedItemNamesWithEffects(external_pricelist, schemaManage
 
   for (const itemName in external_pricelist) {
     const item = external_pricelist[itemName];
-    
+
     // Get actual killstreak variants from database
     const killstreakTiers = getKillstreakTiers(itemName);
-    
+
     for (const qualityId in item.prices) {
       const qualityObj = item.prices[qualityId];
       const qualityName = qualitiesById[qualityId] || '';

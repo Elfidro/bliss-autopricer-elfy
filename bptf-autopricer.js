@@ -163,7 +163,11 @@ async function getPricableItems(db) {
 
 async function emitDefaultBptfPricesForUnpriceableItems() {
   // 1. Get all item names
-  const allItemNames = await getAllPricedItemNamesWithEffects(external_pricelist, schemaManager, db);
+  const allItemNames = await getAllPricedItemNamesWithEffects(
+    external_pricelist,
+    schemaManager,
+    db
+  );
 
   // 2. Read current pricelist
   const pricelist = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8'));
@@ -341,7 +345,11 @@ const calculateAndEmitPrices = async () => {
     console.log(`SKUs to price (updated + priceable):`, Array.from(skusToPrice));
 
     // Get all item names as usual
-    let allItemNames = await getAllPricedItemNamesWithEffects(external_pricelist, schemaManager, db);
+    let allItemNames = await getAllPricedItemNamesWithEffects(
+      external_pricelist,
+      schemaManager,
+      db
+    );
 
     console.log(`Getting killstreak items`);
 
@@ -537,7 +545,11 @@ schemaManager.init(async function (err) {
 
   // After main pricing, fallback for unpriced items
   async function fallbackForUnpricedItems() {
-    const allItemNames = await getAllPricedItemNamesWithEffects(external_pricelist, schemaManager, db);
+    const allItemNames = await getAllPricedItemNamesWithEffects(
+      external_pricelist,
+      schemaManager,
+      db
+    );
     const pricelist = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8'));
     const pricedSkus = new Set(pricelist.items.map((i) => i.sku));
     const pricableSkus = new Set(await getPricableItems(db));
@@ -1251,6 +1263,7 @@ const bptfWebSocket = initBptfWebSocket({
   excludedListingDescriptions,
   blockedAttributes,
   logFile,
+  config,
 });
 
 // Provide websocket stats to the API

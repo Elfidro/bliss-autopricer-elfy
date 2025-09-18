@@ -131,9 +131,28 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
     "healthCheckInterval": 60000,
     "enableHeartbeat": true,
     "heartbeatInterval": 25000
+  },
+  "websocketRelay": {
+    "enabled": false,
+    "protocol": "ws",
+    "host": "localhost",
+    "port": 7789
   }
 }
 ```
+
+**WebSocket Relay Options:**
+
+| Option     | Type    | Default       | Description                                    |
+| ---------- | ------- | ------------- | ---------------------------------------------- |
+| `enabled`  | boolean | `false`       | Enable relay mode instead of direct connection |
+| `protocol` | string  | `"ws"`        | Protocol (`"ws"` or `"wss"`)                   |
+| `host`     | string  | `"localhost"` | Relay server hostname or IP address            |
+| `port`     | number  | `7789`        | Relay server port                              |
+
+⚠️ **Relay Mode**: When enabled, connects to your internal relay server instead of directly to backpack.tf. This allows multiple autopricer instances to share a single websocket connection through your `backpack-tf-socket-relay` service.
+
+The relay connection will use the endpoint: `{protocol}://{host}:{port}/relay`
 
 ### Rate Limiting
 

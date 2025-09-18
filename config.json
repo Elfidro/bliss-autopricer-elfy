@@ -109,5 +109,11 @@
     "Legacy Paint": 5801378
   },
   "botOwnerSteamIDs": [],
+  "websocketRelay": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 7789,
+    "protocol": "ws"
+  },
   "testValue": "Hello World"
 }
