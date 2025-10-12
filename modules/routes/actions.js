@@ -13,11 +13,7 @@ module.exports = function (app, config, configManager) {
 
     return {
       pricelistPath: path.resolve(__dirname, '../../files/pricelist.json'),
-      sellingPricelistPath: path.resolve(
-        selectedBot.tf2autobotPath || selectedBot.tf2AutobotDir,
-        selectedBot.botDirectory || selectedBot.botTradingDir,
-        'pricelist.json'
-      ),
+      sellingPricelistPath: selectedBot.pricelistPath || path.resolve(__dirname, '../../files/pricelist.json'),
       itemListPath: path.resolve(__dirname, '../../files/item_list.json'),
     };
   }

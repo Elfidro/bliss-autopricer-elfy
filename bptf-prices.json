@@ -269274,6 +269274,12 @@
               "currency": "keys",
               "difference": 3690.4,
               "last_update": 1757080833
+            },
+            "381": {
+              "value": 120,
+              "currency": "keys",
+              "difference": 6926.4,
+              "last_update": 1760310505
             }
           }
         }
