@@ -5,6 +5,8 @@ const express = require('express');
 const { loadJson } = require('../utils');
 const renderPage = require('../layout');
 const { getBaseConfigManager } = require('../baseConfigManager');
+const Methods = require('../../methods');
+const methods = new Methods();
 
 module.exports = function (app, config, configManager) {
   const router = express.Router();
@@ -18,16 +20,12 @@ module.exports = function (app, config, configManager) {
     }
 
     return {
-      pollDataPath: path.resolve(
-        selectedBot.tf2autobotPath+"/files/" || selectedBot.tf2AutobotDir+"/files/",
-        selectedBot.botDirectory || selectedBot.botTradingDir,
-        'polldata.json'
-      ),
-      pricelistPath: path.resolve(__dirname, '../../files/pricelist.json'),
+      pollDataPath: selectedBot.polldataPath || '',
+      pricelistPath: selectedBot.pricelistPath || path.resolve(__dirname, '../../files/pricelist.json'),
     };
   }
 
-  router.get('/pnl', (req, res) => {
+  router.get('/pnl', async (req, res) => {
     try {
       // Check if bot is configured
       const selectedBot = configManager.getSelectedBot();
@@ -46,15 +44,9 @@ module.exports = function (app, config, configManager) {
       }
 
       const paths = getBotPaths();
-      let keyPrice = loadJson(paths.pricelistPath).items.find((i) => i.sku === '5021;6')?.sell
-        ?.metal;
-
-      // Add safety check for key price
-      if (!keyPrice || keyPrice <= 0 || keyPrice > 1000) {
-        console.warn('Warning: Invalid key price detected:', keyPrice, 'defaulting to 52.22');
-        // Use a reasonable default if key price is missing or seems wrong
-        keyPrice = 52.22;
-      }
+      
+      // Get key price with PriceDB.io fallback
+      const keyPrice = await methods.getKeyPrice(paths.pricelistPath);
 
       let parsed;
       try {

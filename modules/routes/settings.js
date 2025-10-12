@@ -190,22 +190,83 @@ module.exports = function (app) {
         <small style="color: #666;">Minimum profit margin for selling (0.11 = 11%)</small>
       </div>`;
       html += `<div>
-        <label style="display: flex; align-items: center; margin-bottom: 15px;">
-          <input type="checkbox" name="always_query_snapshot" ${config.alwaysQuerySnapshotAPI ? 'checked' : ''} 
-                 style="margin-right: 8px;">
-          <span style="font-weight: bold;">Always Query Snapshot API</span>
-        </label>
-        <label style="display: flex; align-items: center; margin-bottom: 15px;">
-          <input type="checkbox" name="fallback_prices_tf" ${config.fallbackOntoPricesTf ? 'checked' : ''} 
-                 style="margin-right: 8px;">
-          <span style="font-weight: bold;">Fallback to Prices.tf</span>
-        </label>
-        <label style="display: flex; align-items: center;">
-          <input type="checkbox" name="price_all_items" ${config.priceAllItems ? 'checked' : ''} 
-                 style="margin-right: 8px;">
-          <span style="font-weight: bold;">Price All Items</span>
-        </label>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">SCM Margin Buy:</label>
+        <input type="number" name="scm_margin_buy" value="${config.scmMarginBuy ?? 0}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               step="0.01">
+        <small style="color: #666;">Steam Community Market margin for buy prices</small>
       </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">SCM Margin Sell:</label>
+        <input type="number" name="scm_margin_sell" value="${config.scmMarginSell ?? 0}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               step="0.01">
+        <small style="color: #666;">Steam Community Market margin for sell prices</small>
+      </div>`;
+      html += `<div style="grid-column: 1 / -1;">
+        <label style="display: flex; align-items: center; margin-bottom: 10px;">
+          <input type="checkbox" name="use_pricedb_fallback" ${config.usePriceDbFallback !== false ? 'checked' : ''} 
+                 style="margin-right: 8px;">
+          <span style="font-weight: bold;">Use PriceDB.io as Priority Fallback</span>
+        </label>
+        <small style="color: #666; display: block; margin-left: 24px;">Uses pricedb.io as PRIMARY fallback when listings are insufficient (before SCM)</small>
+      </div>`;
+      html += `<div style="grid-column: 1 / -1;">
+        <label style="display: flex; align-items: center; margin-bottom: 10px;">
+          <input type="checkbox" name="use_scm_fallback" ${config.useScmFallback !== false ? 'checked' : ''} 
+                 style="margin-right: 8px;">
+          <span style="font-weight: bold;">Use Steam Community Market Fallback</span>
+        </label>
+        <small style="color: #666; display: block; margin-left: 24px;">Use Steam Community Market as fallback pricing source (will be used after PriceDB if both are enabled)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Excluded Steam IDs Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">🚫 Excluded Steam IDs</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Steam IDs to exclude from listing calculations (e.g., known scammers, manipulators)</p>';
+
+      const excludedIds = config.excludedSteamIDs || [];
+      html += '<div>';
+      html += `<textarea name="excluded_steam_ids" rows="6" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"
+               placeholder="Enter one Steam ID per line&#10;76561198083901668&#10;76561198123456789">${excludedIds.join('\n')}</textarea>`;
+      html += '<small style="color: #666;">One Steam ID per line (17 digits)</small>';
+      html += '</div>';
+      html += '</div>';
+
+      // Trusted Steam IDs Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">⭐ Trusted/Priority Steam IDs</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Steam IDs that are trusted and given priority in listing calculations</p>';
+
+      const trustedIds = config.trustedSteamIDs || [];
+      html += '<div>';
+      html += `<textarea name="trusted_steam_ids" rows="6" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"
+               placeholder="Enter one Steam ID per line&#10;76561198083901668&#10;76561198123456789">${trustedIds.join('\n')}</textarea>`;
+      html += '<small style="color: #666;">One Steam ID per line (17 digits)</small>';
+      html += '</div>';
+      html += '</div>';
+
+      // Excluded Listing Descriptions Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">🔇 Excluded Listing Descriptions</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Keywords to filter out from listing descriptions (e.g., "spell", "exorcism", "footsteps")</p>';
+
+      const excludedDescriptions = config.excludedListingDescriptions || [];
+      html += '<div>';
+      html += `<textarea name="excluded_descriptions" rows="6" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"
+               placeholder="Enter one keyword per line&#10;exorcism&#10;spell&#10;footsteps">${excludedDescriptions.join('\n')}</textarea>`;
+      html += '<small style="color: #666;">One keyword per line (case-insensitive)</small>';
       html += '</div>';
       html += '</div>';
 
@@ -243,10 +304,51 @@ module.exports = function (app) {
         '<button type="button" onclick="addOwnerRow()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">➕ Add Another Owner</button>';
       html += '</div>';
 
-      // Price Settings Section (remove non-existent ones)
+      // WebSocket Relay Configuration Section
       html += '<div style="margin-bottom: 30px;">';
       html +=
-        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">💰 Price Swing Limits</h3>';
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">🔌 WebSocket Relay Configuration</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Configure connection to backpack.tf websocket relay server (allows multiple instances to share one connection)</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: flex; align-items: center; margin-bottom: 15px;">
+          <input type="checkbox" name="relay_enabled" ${config.websocketRelay?.enabled ? 'checked' : ''} 
+                 style="margin-right: 8px;">
+          <span style="font-weight: bold;">Enable Relay Mode</span>
+        </label>
+        <small style="color: #666;">Use relay server instead of direct backpack.tf connection</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Protocol:</label>
+        <select name="relay_protocol" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+          <option value="ws" ${(config.websocketRelay?.protocol || 'ws') === 'ws' ? 'selected' : ''}>ws (HTTP)</option>
+          <option value="wss" ${(config.websocketRelay?.protocol || 'ws') === 'wss' ? 'selected' : ''}>wss (HTTPS)</option>
+        </select>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Host:</label>
+        <input type="text" name="relay_host" value="${config.websocketRelay?.host || 'localhost'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">IP address or hostname of relay server</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Relay Port:</label>
+        <input type="number" name="relay_port" value="${config.websocketRelay?.port || 7789}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" min="1" max="65535">
+        <small style="color: #666;">Port number of relay server (default: 7789)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Price Swing Limits Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">� Price Swing Limits</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Control maximum price changes per update to prevent sudden swings</p>';
 
       html +=
         '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
@@ -263,6 +365,32 @@ module.exports = function (app) {
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                min="0" max="1" step="0.01">
         <small style="color: #666;">Maximum sell price decrease per update (0.1 = 10%)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Max Percentage Differences Section
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">📈 Max Percentage Differences (BPTF Baseline)</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Maximum allowed difference from Backpack.tf baseline prices before rejecting</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Buy Difference:</label>
+        <input type="number" name="max_percentage_diff_buy" value="${config.maxPercentageDifferences?.buy ?? 5}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               step="0.1">
+        <small style="color: #666;">Maximum % buy price can differ from BPTF (5 = 5%)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Sell Difference:</label>
+        <input type="number" name="max_percentage_diff_sell" value="${config.maxPercentageDifferences?.sell ?? -8}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               step="0.1">
+        <small style="color: #666;">Maximum % sell price can differ from BPTF (-8 = -8%)</small>
       </div>`;
       html += '</div>';
       html += '</div>';
@@ -369,6 +497,10 @@ module.exports = function (app) {
       config.pricerPort = parseInt(req.body.pricer_port) || 3456;
       config.minSellMargin = parseFloat(req.body.min_sell_margin) || 0.11;
 
+      // Update SCM margins
+      config.scmMarginBuy = parseFloat(req.body.scm_margin_buy) || 0;
+      config.scmMarginSell = parseFloat(req.body.scm_margin_sell) || 0;
+
       // Update price swing limits
       if (!config.priceSwingLimits) {
         config.priceSwingLimits = {};
@@ -376,10 +508,46 @@ module.exports = function (app) {
       config.priceSwingLimits.maxBuyIncrease = parseFloat(req.body.max_buy_increase) || 0.1;
       config.priceSwingLimits.maxSellDecrease = parseFloat(req.body.max_sell_decrease) || 0.1;
 
+      // Update max percentage differences
+      if (!config.maxPercentageDifferences) {
+        config.maxPercentageDifferences = {};
+      }
+      config.maxPercentageDifferences.buy = parseFloat(req.body.max_percentage_diff_buy) ?? 5;
+      config.maxPercentageDifferences.sell = parseFloat(req.body.max_percentage_diff_sell) ?? -8;
+
       // Update trading settings
-      config.alwaysQuerySnapshotAPI = req.body.always_query_snapshot === 'on';
-      config.fallbackOntoPricesTf = req.body.fallback_prices_tf === 'on';
-      config.priceAllItems = req.body.price_all_items === 'on';
+      config.usePriceDbFallback = req.body.use_pricedb_fallback === 'on';
+      config.useScmFallback = req.body.use_scm_fallback === 'on';
+
+      // Update excluded Steam IDs
+      if (req.body.excluded_steam_ids) {
+        config.excludedSteamIDs = req.body.excluded_steam_ids
+          .split('\n')
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0 && /^[0-9]{17}$/.test(id));
+      } else {
+        config.excludedSteamIDs = [];
+      }
+
+      // Update trusted Steam IDs
+      if (req.body.trusted_steam_ids) {
+        config.trustedSteamIDs = req.body.trusted_steam_ids
+          .split('\n')
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0 && /^[0-9]{17}$/.test(id));
+      } else {
+        config.trustedSteamIDs = [];
+      }
+
+      // Update excluded listing descriptions
+      if (req.body.excluded_descriptions) {
+        config.excludedListingDescriptions = req.body.excluded_descriptions
+          .split('\n')
+          .map((desc) => desc.trim())
+          .filter((desc) => desc.length > 0);
+      } else {
+        config.excludedListingDescriptions = [];
+      }
 
       // Update bot owner Steam IDs
       let ownerIds = req.body.bot_owner_ids || [];
@@ -391,6 +559,15 @@ module.exports = function (app) {
         .filter((id) => id && id.trim().length > 0)
         .map((id) => id.trim())
         .filter((id) => /^[0-9]{17}$/.test(id)); // Basic Steam ID validation
+
+      // Update websocket relay settings
+      if (!config.websocketRelay) {
+        config.websocketRelay = {};
+      }
+      config.websocketRelay.enabled = req.body.relay_enabled === 'on';
+      config.websocketRelay.protocol = req.body.relay_protocol || 'ws';
+      config.websocketRelay.host = req.body.relay_host || 'localhost';
+      config.websocketRelay.port = parseInt(req.body.relay_port) || 7789;
 
       // Update pricer config settings
       pricerConfig.port = parseInt(req.body.web_port) || 3000;

@@ -1,13 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 const renderPage = require('../layout');
+const Methods = require('../../methods');
+const methods = new Methods();
 
 function loadJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
 module.exports = function (app, config, configManager) {
-  app.get('/trades', (req, res) => {
+  app.get('/trades', async (req, res) => {
     try {
       const selectedBot = configManager.getSelectedBot();
       if (!selectedBot) {
@@ -24,14 +26,18 @@ module.exports = function (app, config, configManager) {
         return res.send(renderPage('Trade History - No Bot Configured', html));
       }
 
-      const pollDataPath = path.resolve(
-        selectedBot.tf2autobotPath+"/files/" || selectedBot.tf2AutobotDir+"/files/",
-        selectedBot.botDirectory || selectedBot.botTradingDir,
-        'polldata.json'
-      );
-      const pricelistPath = path.resolve(__dirname, '../../files/pricelist.json');
-      const pricelist = loadJson(pricelistPath);
-      const keyPrice = pricelist.items.find((i) => i.sku === '5021;6')?.sell?.metal || 68.11;
+      const pollDataPath = selectedBot.polldataPath || '';
+      const pricelistPath = selectedBot.pricelistPath || path.resolve(__dirname, '../../files/pricelist.json');
+      
+      // Get key price with PriceDB.io fallback
+      const keyPrice = await methods.getKeyPrice(pricelistPath);
+      
+      let pricelist = { items: [] };
+      try {
+        pricelist = loadJson(pricelistPath);
+      } catch (error) {
+        console.warn('Could not load pricelist, using empty pricelist:', error.message || error);
+      }
 
       const currencyMap = {
         '5000;6': 'Scrap Metal',
@@ -41,7 +47,7 @@ module.exports = function (app, config, configManager) {
       };
       const skuToName = {
         ...currencyMap,
-        ...Object.fromEntries(pricelist.items.map((item) => [item.sku, item.name])),
+        ...(pricelist && pricelist.items ? Object.fromEntries(pricelist.items.map((item) => [item.sku, item.name])) : {}),
       };
 
       let trades = [];

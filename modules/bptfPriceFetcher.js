@@ -33,13 +33,14 @@ async function getBptfPrices(force = false) {
 // Helper to get price for a specific SKU (handles unusuals and effects)
 function getBptfItemPrice(items, sku) {
   // eslint-disable-next-line spellcheck/spell-checker
-  // SKU (defindex;quality;Effect;...;australium)
+  // SKU (defindex;quality;Effect;...;australium;uncraftable)
   const parts = sku.split(';');
   const defindex = parts[0];
   const quality = parts[1];
   const effectPart = parts[2];
   const effect = effectPart && effectPart.startsWith('u') ? effectPart.slice(1) : null;
   const isAustralium = parts.includes('australium');
+  const isUncraftable = parts.includes('uncraftable');
 
   // Find all items with this defindex
   const candidates = Object.entries(items).filter(
@@ -72,26 +73,34 @@ function getBptfItemPrice(items, sku) {
   }
 
   const tradable = item.prices[quality].Tradable;
-  if (!tradable || !tradable.Craftable) {
+  if (!tradable) {
+    return null;
+  }
+
+  // Determine which craft type to use
+  const craftType = isUncraftable ? 'Non-Craftable' : 'Craftable';
+  const craftTypeData = tradable[craftType];
+
+  if (!craftTypeData) {
     return null;
   }
 
   // For unusuals, find the correct effect
   if (quality === '5' && effect) {
-    if (Array.isArray(tradable.Craftable)) {
-      // Craftable is an array for unusuals (rare, but handle just in case)
-      const effectObj = tradable.Craftable.find(
+    if (Array.isArray(craftTypeData)) {
+      // craftTypeData is an array for unusuals (rare, but handle just in case)
+      const effectObj = craftTypeData.find(
         (e) => String(e.effect) === effect && (!isAustralium || e.australium)
       );
       if (effectObj) {
         return effectObj;
       }
       // fallback to just effect match
-      const fallbackEffectObj = tradable.Craftable.find((e) => String(e.effect) === effect);
-      return fallbackEffectObj || tradable.Craftable[0];
+      const fallbackEffectObj = craftTypeData.find((e) => String(e.effect) === effect);
+      return fallbackEffectObj || craftTypeData[0];
     } else {
-      // Craftable is an object keyed by effect ID
-      const craftableArr = Object.entries(tradable.Craftable).map(([effectId, obj]) => ({
+      // craftTypeData is an object keyed by effect ID
+      const craftableArr = Object.entries(craftTypeData).map(([effectId, obj]) => ({
         ...obj,
         effect: effectId, // inject effect ID as property
       }));
@@ -108,23 +117,27 @@ function getBptfItemPrice(items, sku) {
   }
 
   // For australium, pick the entry with australium: true if present
-  if (isAustralium && Array.isArray(tradable.Craftable)) {
-    const aussieEntry = tradable.Craftable.find((e) => e.australium === true);
+  if (isAustralium && Array.isArray(craftTypeData)) {
+    const aussieEntry = craftTypeData.find((e) => e.australium === true);
     if (aussieEntry) {
       return aussieEntry;
     }
   }
 
   // Otherwise, just return the first
-  if (Array.isArray(tradable.Craftable)) {
-    return tradable.Craftable[0];
+  if (Array.isArray(craftTypeData)) {
+    return craftTypeData[0];
   } else {
     // Sometimes it's an object keyed by price index
-    return Object.values(tradable.Craftable)[0];
+    return Object.values(craftTypeData)[0];
   }
 }
 
-function getAllPricedItemNamesWithEffects(external_pricelist, schemaManager) {
+async function getAllPricedItemNamesWithEffects(
+  external_pricelist,
+  schemaManager,
+  dbConnection = null
+) {
   const names = [];
   const qualities = schemaManager.schema.qualities || {};
   const qualitiesById = {};
@@ -138,49 +151,101 @@ function getAllPricedItemNamesWithEffects(external_pricelist, schemaManager) {
     effects[id] = name;
   }
 
-  const killstreakTiers = [
-    null, //,//Temp removal while looking for a better way to handle killstreak items basically fuck this rn
-    //'Killstreak',
-    //'Specialized Killstreak',
-    //'Professional Killstreak'
-  ];
+  // Build killstreak lookup map from database
+  const killstreakMap = new Map();
+  if (dbConnection) {
+    try {
+      // Query database once for all killstreak SKUs
+      const query = `
+        SELECT DISTINCT name, sku FROM tf2.listings 
+        WHERE sku LIKE '%;kt-%'
+      `;
+      const result = await dbConnection.any(query);
+
+      // Build map of item name -> set of killstreak tiers
+      for (const row of result) {
+        const { name: itemName, sku } = row;
+        const ktMatch = sku.match(/;kt-(\d+)/);
+        if (ktMatch) {
+          const tier = parseInt(ktMatch[1], 10);
+          if (!killstreakMap.has(itemName)) {
+            killstreakMap.set(itemName, new Set([null])); // Always include base variant
+          }
+          killstreakMap.get(itemName).add(tier);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to query killstreak variants from database:', error.message);
+    }
+  }
+
+  // Helper function to get killstreak variants for an item
+  function getKillstreakTiers(itemName) {
+    if (killstreakMap.has(itemName)) {
+      return Array.from(killstreakMap.get(itemName)).sort((a, b) => (a || 0) - (b || 0));
+    }
+    return [null]; // Base variant only
+  }
+
+  // Killstreak tier mapping
+  const killstreakTierNames = {
+    null: null, // Base item (no killstreak)
+    1: 'Killstreak',
+    2: 'Specialized Killstreak',
+    3: 'Professional Killstreak',
+  };
 
   for (const itemName in external_pricelist) {
     const item = external_pricelist[itemName];
+
+    // Get actual killstreak variants from database
+    const killstreakTiers = getKillstreakTiers(itemName);
+
     for (const qualityId in item.prices) {
       const qualityObj = item.prices[qualityId];
       const qualityName = qualitiesById[qualityId] || '';
       if (qualityObj.Tradable) {
+        // Process both Craftable and Non-Craftable items
         for (const craftType in qualityObj.Tradable) {
           const arrOrObj = qualityObj.Tradable[craftType];
-          // Unusuals and rare qualities: Craftable is an object keyed by effect ID
+          const isNonCraftable = craftType === 'Non-Craftable';
+          const craftPrefix = isNonCraftable ? 'Non-Craftable ' : '';
+
+          // Unusuals and rare qualities: Craftable/Non-Craftable is an object keyed by effect ID
           if (typeof arrOrObj === 'object' && !Array.isArray(arrOrObj)) {
             // Only add effect name for Unusuals (qualityId === '5')
             if (qualityId === '5') {
               for (const effectId in arrOrObj) {
                 const effectName = effects[effectId] || effectId;
-                for (const ks of killstreakTiers) {
-                  const ksPrefix = ks ? ks + ' ' : '';
+                // Generate all killstreak variants found in database
+                for (const ksTier of killstreakTiers) {
+                  const ksName = killstreakTierNames[ksTier];
+                  const ksPrefix = ksName ? ksName + ' ' : '';
                   // Only add quality if not Unique (6) and not Unusual (5)
                   const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
-                  // Compose: "Professional Killstreak Burning Flames Strange Item"
-                  names.push(`${ksPrefix}${effectName} ${prefix}${itemName}`.trim());
+                  // Compose: "Non-Craftable Strange Professional Killstreak Burning Flames Item"
+                  names.push(`${craftPrefix}${prefix}${ksPrefix}${effectName} ${itemName}`.trim());
                 }
               }
             } else {
               // For non-unusuals, do NOT prepend effect name
-              for (const ks of killstreakTiers) {
-                const ksPrefix = ks ? ks + ' ' : '';
+              for (const ksTier of killstreakTiers) {
+                const ksName = killstreakTierNames[ksTier];
+                const ksPrefix = ksName ? ksName + ' ' : '';
                 const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
-                names.push(`${ksPrefix}${prefix}${itemName}`.trim());
+                // Compose: "Non-Craftable Strange Professional Killstreak Item"
+                names.push(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
               }
             }
           } else if (Array.isArray(arrOrObj)) {
-            for (const ks of killstreakTiers) {
-              const ksPrefix = ks ? ks + ' ' : '';
+            // Generate all killstreak variants found in database
+            for (const ksTier of killstreakTiers) {
+              const ksName = killstreakTierNames[ksTier];
+              const ksPrefix = ksName ? ksName + ' ' : '';
               // Only add quality if not Unique (6) and not Unusual (5)
               const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
-              names.push(`${ksPrefix}${prefix}${itemName}`.trim());
+              // Compose: "Non-Craftable Strange Professional Killstreak Item"
+              names.push(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
             }
           }
         }

@@ -12,8 +12,9 @@ Complete reference for all Bliss Autopricer configuration options.
   "bots": {
     "main-bot": {
       "name": "Main Trading Bot",
-      "tf2autobotPath": "/path/to/tf2autobot",
-      "botDirectory": "files/main-bot",
+      "polldataPath": "C:/tf2autobot/files/main-bot/polldata.json",
+      "pricelistPath": "C:/tf2autobot/files/main-bot/pricelist.json",
+      "steamId": "76561198012345678",
       "description": "Primary trading bot"
     }
   },
@@ -41,14 +42,17 @@ Complete reference for all Bliss Autopricer configuration options.
 
 ### Bot Configuration
 
-| Option           | Type   | Required | Description                              |
-| ---------------- | ------ | -------- | ---------------------------------------- |
-| `name`           | string | Yes      | Display name for the bot                 |
-| `tf2autobotPath` | string | Yes      | Absolute path to TF2Autobot installation |
-| `botDirectory`   | string | Yes      | Relative path to bot's files directory   |
-| `description`    | string | No       | Optional description of bot's purpose    |
-| `tags`           | array  | No       | Tags for organizing bots                 |
-| `group`          | string | No       | Group name for bot categorization        |
+⚠️ **Breaking Change**: Bot configuration now requires direct file paths instead of installation directories.
+
+| Option          | Type   | Required | Description                                  |
+| --------------- | ------ | -------- | -------------------------------------------- |
+| `name`          | string | Yes      | Display name for the bot                     |
+| `polldataPath`  | string | Yes      | Absolute path to bot's `polldata.json` file  |
+| `pricelistPath` | string | Yes      | Absolute path to bot's `pricelist.json` file |
+| `steamId`       | string | Yes      | Bot's 64-bit Steam ID                        |
+| `description`   | string | No       | Optional description of bot's purpose        |
+| `tags`          | array  | No       | Tags for organizing bots                     |
+| `group`         | string | No       | Group name for bot categorization            |
 
 ### Database Configuration
 
@@ -77,39 +81,37 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 }
 ```
 
-### Pricing Strategy
+### Pricing Configuration
 
 ```json
 {
-  "pricingStrategy": {
-    "scmFallback": true,
-    "scmMarginBuy": 0.1,
-    "scmMarginSell": 0.15,
-    "bptfFallback": true,
-    "outlierThreshold": 0.3,
-    "minListings": 3,
-    "maxAge": 86400,
-    "unusualPricing": false,
-    "aggressivePricing": false,
-    "safetyMargins": true
+  "minSellMargin": 0.11,
+  "usePriceDbFallback": true,
+  "alwaysQuerySnapshotAPI": true,
+  "maxPercentageDifferences": {
+    "buy": 5,
+    "sell": -8
+  },
+  "priceSwingLimits": {
+    "maxBuyIncrease": 0.1,
+    "maxSellDecrease": 0.1
   }
 }
 ```
 
-### Pricing Strategy Options
+### Pricing Options
 
-| Option              | Type    | Default | Description                                    |
-| ------------------- | ------- | ------- | ---------------------------------------------- |
-| `scmFallback`       | boolean | `true`  | Enable Steam Community Market fallback pricing |
-| `scmMarginBuy`      | number  | `0.10`  | Buy margin for SCM prices (10% = 0.10)         |
-| `scmMarginSell`     | number  | `0.15`  | Sell margin for SCM prices (15% = 0.15)        |
-| `bptfFallback`      | boolean | `true`  | Enable backpack.tf fallback pricing            |
-| `outlierThreshold`  | number  | `0.30`  | Threshold for filtering outlier listings       |
-| `minListings`       | number  | `3`     | Minimum listings required for pricing          |
-| `maxAge`            | number  | `86400` | Maximum age of listings to consider (seconds)  |
-| `unusualPricing`    | boolean | `false` | Enable special unusual pricing logic           |
-| `aggressivePricing` | boolean | `false` | Use more aggressive pricing strategy           |
-| `safetyMargins`     | boolean | `true`  | Apply additional safety margins                |
+| Option                  | Type    | Default | Description                                                       |
+| ----------------------- | ------- | ------- | ----------------------------------------------------------------- |
+| `minSellMargin`         | number  | `0.11`  | Minimum profit margin for selling (0.11 = 11% or 1 scrap)        |
+| `usePriceDbFallback`    | boolean | `true`  | Use pricedb.io as primary fallback, then SCM if item not found   |
+| `alwaysQuerySnapshotAPI`| boolean | `true`  | Always query the snapshot API for price data                      |
+| `maxPercentageDifferences.buy` | number | `5` | Maximum percentage difference for buy prices vs baseline    |
+| `maxPercentageDifferences.sell` | number | `-8` | Maximum percentage difference for sell prices vs baseline  |
+| `priceSwingLimits.maxBuyIncrease` | number | `0.1` | Maximum buy price increase (10%)                        |
+| `priceSwingLimits.maxSellDecrease` | number | `0.1` | Maximum sell price decrease (10%)                      |
+
+**Note**: `priceAllItems` and `fallbackOntoPricesTf` have been removed from the public release. Users must manually add items through the GUI or `item_list.json`.
 
 ### Trusted/Blacklisted Users
 
@@ -131,9 +133,28 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
     "healthCheckInterval": 60000,
     "enableHeartbeat": true,
     "heartbeatInterval": 25000
+  },
+  "websocketRelay": {
+    "enabled": false,
+    "protocol": "ws",
+    "host": "localhost",
+    "port": 7789
   }
 }
 ```
+
+**WebSocket Relay Options:**
+
+| Option     | Type    | Default       | Description                                    |
+| ---------- | ------- | ------------- | ---------------------------------------------- |
+| `enabled`  | boolean | `false`       | Enable relay mode instead of direct connection |
+| `protocol` | string  | `"ws"`        | Protocol (`"ws"` or `"wss"`)                   |
+| `host`     | string  | `"localhost"` | Relay server hostname or IP address            |
+| `port`     | number  | `7789`        | Relay server port                              |
+
+⚠️ **Relay Mode**: When enabled, connects to your internal relay server instead of directly to backpack.tf. This allows multiple autopricer instances to share a single websocket connection through your `backpack-tf-socket-relay` service.
+
+The relay connection will use the endpoint: `{protocol}://{host}:{port}/relay`
 
 ### Rate Limiting
 
@@ -232,13 +253,13 @@ The configuration is validated against a JSON schema. Key validation rules:
 ### Required Fields
 
 - `selectedBot` must exist in `bots` object
-- Each bot must have `name`, `tf2autobotPath`, and `botDirectory`
+- Each bot must have `name`, `polldataPath`, `pricelistPath`, and `steamId`
 - Database configuration must include all connection details
 
 ### Path Validation
 
-- `tf2autobotPath` must be absolute path
-- `botDirectory` must be relative path
+- `polldataPath` must be absolute path to existing `polldata.json` file
+- `pricelistPath` must be absolute path to existing `pricelist.json` file
 - Paths must exist and be accessible
 
 ### Type Validation
@@ -246,30 +267,30 @@ The configuration is validated against a JSON schema. Key validation rules:
 - Port numbers must be valid integers (1-65535)
 - Margins must be numbers between 0 and 1
 - Boolean values must be true/false
+- `steamId` must be valid 64-bit Steam ID string
 
 ## Configuration Migration
 
-### From Legacy Format
+⚠️ **Breaking Change**: The bot configuration format has changed significantly. Previous installations using `tf2autobotPath` and `botDirectory` must be reconfigured manually using the Bot Configuration GUI with direct file paths.
 
-Old single-bot configuration is automatically migrated:
+### Old Format (No Longer Supported)
 
 ```json
-// Old format (config.json)
+// Old format - NO LONGER WORKS
 {
-  "tf2AutobotDir": "/path/to/bot",
-  "botTradingDir": "files/bot1"
+  "tf2autobotPath": "/path/to/tf2autobot",
+  "botDirectory": "files/bot1"
 }
+```
 
-// New format (pricerConfig.json)
+### New Format (Required)
+
+```json
+// New format - Direct file paths required
 {
-  "selectedBot": "migrated-bot",
-  "bots": {
-    "migrated-bot": {
-      "name": "Migrated Bot",
-      "tf2autobotPath": "/path/to/bot",
-      "botDirectory": "files/bot1"
-    }
-  }
+  "polldataPath": "C:/tf2autobot/files/bot1/polldata.json",
+  "pricelistPath": "C:/tf2autobot/files/bot1/pricelist.json",
+  "steamId": "76561198012345678"
 }
 ```
 

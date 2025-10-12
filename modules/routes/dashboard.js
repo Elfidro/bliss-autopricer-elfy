@@ -2,18 +2,42 @@ const path = require('path');
 const renderPage = require('../layout');
 const { loadJson } = require('../utils');
 const { db } = require('../dbInstance');
+const { getBaseConfigManager } = require('../baseConfigManager');
 
-module.exports = function (app) {
+module.exports = function (app, configManager) {
   app.get('/dashboard', async (req, res) => {
     try {
-      // Load trade data
-      const pollDataPath = path.resolve(__dirname, '../../polldata.json');
+      // Load trade data from configured bot
+      const selectedBot = configManager?.getSelectedBot();
+      const pollDataPath = selectedBot?.polldataPath || path.resolve(__dirname, '../../polldata.json');
       let trades = [];
       try {
         const pollData = loadJson(pollDataPath);
-        trades = pollData || [];
+        // polldata.json contains { offerData: {...} } - extract trades from offerData
+        if (pollData && pollData.offerData) {
+          // Filter for only accepted trades (same as P&L page)
+          const allTrades = Object.values(pollData.offerData);
+          
+          // Get bot owner Steam IDs for exclusion from profit calculations
+          let mainConfig = {};
+          try {
+            mainConfig = getBaseConfigManager().getConfig();
+          } catch (error) {
+            console.warn('Could not load main config.json for bot owner exclusion:', error.message);
+          }
+          
+          const botOwnerSteamIDs = new Set(mainConfig.botOwnerSteamIDs || []);
+          
+          // Filter: only accepted trades, exclude bot owner trades
+          trades = allTrades.filter((t) => {
+            if (!t.isAccepted) return false;
+            if (t.partner && botOwnerSteamIDs.has(t.partner)) return false;
+            return true;
+          });
+        }
       } catch (error) {
-        console.log('No polldata.json found');
+        // Silent fail - dashboard works without trade data
+        console.log('Could not load polldata.json:', error.message || error);
       }
 
       // Calculate 24-hour metrics
@@ -21,49 +45,64 @@ module.exports = function (app) {
       const oneDayAgo = now - 24 * 60 * 60 * 1000;
       const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
 
-      const trades24h = trades.filter((trade) => trade.time * 1000 > oneDayAgo);
-      const trades7d = trades.filter((trade) => trade.time * 1000 > oneWeekAgo);
+      const trades24h = Array.isArray(trades) ? trades.filter((trade) => trade.time * 1000 > oneDayAgo) : [];
+      const trades7d = Array.isArray(trades) ? trades.filter((trade) => trade.time * 1000 > oneWeekAgo) : [];
 
       // Calculate profit/loss for recent trades
       let totalProfit24h = 0;
       let totalProfit7d = 0;
       let totalProfitAll = 0;
 
-      // Simple profit calculation for dashboard overview
+      // Get dynamic key price
+      const Methods = require('../../methods');
+      const methods = new Methods();
+      const pricelistPath = selectedBot?.pricelistPath || path.resolve(__dirname, '../../pricelist.json');
+      const keyPrice = await methods.getKeyPrice(pricelistPath);
+
+      // Calculate profit using trade value structure (value.our vs value.their)
       trades24h.forEach((trade) => {
-        if (trade.intent === 'sell' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60; // Approximate key value
-          totalProfit24h += metalValue + keyValue;
-        } else if (trade.intent === 'buy' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60;
-          totalProfit24h -= metalValue + keyValue;
+        const valueOur = trade.value?.our || { keys: 0, metal: 0 };
+        const valueTheir = trade.value?.their || { keys: 0, metal: 0 };
+        
+        let ourTotalMetal, theirTotalMetal;
+        if (valueOur.total !== undefined && valueTheir.total !== undefined) {
+          ourTotalMetal = valueOur.total / 9; // Convert scrap to refined
+          theirTotalMetal = valueTheir.total / 9;
+        } else {
+          ourTotalMetal = (valueOur.keys || 0) * keyPrice + (valueOur.metal || 0);
+          theirTotalMetal = (valueTheir.keys || 0) * keyPrice + (valueTheir.metal || 0);
         }
+        totalProfit24h += (theirTotalMetal - ourTotalMetal);
       });
 
       trades7d.forEach((trade) => {
-        if (trade.intent === 'sell' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60;
-          totalProfit7d += metalValue + keyValue;
-        } else if (trade.intent === 'buy' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60;
-          totalProfit7d -= metalValue + keyValue;
+        const valueOur = trade.value?.our || { keys: 0, metal: 0 };
+        const valueTheir = trade.value?.their || { keys: 0, metal: 0 };
+        
+        let ourTotalMetal, theirTotalMetal;
+        if (valueOur.total !== undefined && valueTheir.total !== undefined) {
+          ourTotalMetal = valueOur.total / 9;
+          theirTotalMetal = valueTheir.total / 9;
+        } else {
+          ourTotalMetal = (valueOur.keys || 0) * keyPrice + (valueOur.metal || 0);
+          theirTotalMetal = (valueTheir.keys || 0) * keyPrice + (valueTheir.metal || 0);
         }
+        totalProfit7d += (theirTotalMetal - ourTotalMetal);
       });
 
       trades.forEach((trade) => {
-        if (trade.intent === 'sell' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60;
-          totalProfitAll += metalValue + keyValue;
-        } else if (trade.intent === 'buy' && trade.currencies) {
-          const metalValue = trade.currencies.metal || 0;
-          const keyValue = (trade.currencies.keys || 0) * 60;
-          totalProfitAll -= metalValue + keyValue;
+        const valueOur = trade.value?.our || { keys: 0, metal: 0 };
+        const valueTheir = trade.value?.their || { keys: 0, metal: 0 };
+        
+        let ourTotalMetal, theirTotalMetal;
+        if (valueOur.total !== undefined && valueTheir.total !== undefined) {
+          ourTotalMetal = valueOur.total / 9;
+          theirTotalMetal = valueTheir.total / 9;
+        } else {
+          ourTotalMetal = (valueOur.keys || 0) * keyPrice + (valueOur.metal || 0);
+          theirTotalMetal = (valueTheir.keys || 0) * keyPrice + (valueTheir.metal || 0);
         }
+        totalProfitAll += (theirTotalMetal - ourTotalMetal);
       });
 
       // Get key price data for health check

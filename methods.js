@@ -1,16 +1,12 @@
-/* eslint-disable no-useless-catch */
 // eslint-disable-next-line spellcheck/spell-checker
 /* eslint-disable no-prototype-builtins */
 var Methods = function () {};
 var fs = require('fs');
-const path = require('path');
 
-const axios = require('axios');
 const AsyncLock = require('async-lock');
 const lock = new AsyncLock();
 
 const { getBaseConfigManager } = require('./modules/baseConfigManager');
-const CACHE_FILE_PATH = path.resolve(__dirname, 'cached-pricelist.json');
 
 const { getBptfItemPrice } = require('./modules/bptfPriceFetcher');
 
@@ -62,16 +58,6 @@ Methods.prototype.calculateBptfBaselineDifference = function (
     return false;
   }
   return true;
-};
-
-Methods.prototype.halfScrapToRefined = function (halfscrap) {
-  var refined = parseFloat((halfscrap / 18).toString().match(/^-?\d+(?:\.\d{0,2})?/)[0]);
-  return refined;
-};
-
-Methods.prototype.refinedToHalfScrap = function (refined) {
-  var halfScrap = parseFloat((refined * 18).toString().match(/^-?\d+(?:\.\d{0,2})?/)[0]);
-  return halfScrap;
 };
 
 // Rounds the metal value to the nearest scrap.
@@ -400,89 +386,6 @@ Methods.prototype.addToPricelist = function (item, PRICELIST_PATH) {
 };
 
 // Request related methods.
-// This method is now deprecated on Backpack.tf and will not work.
-Methods.prototype.getListingsFromSnapshots = async function (name) {
-  try {
-    // Endpoint is limited to 1 request per 60 seconds.
-    await this.waitXSeconds(1);
-    const config = getConfig();
-    const response = await axios.get('https://backpack.tf/api/classifieds/listings/snapshot', {
-      params: {
-        sku: name,
-        appid: 440,
-        token: config.bptfToken,
-      },
-    });
-    if (response.status === 200) {
-      const listings = response.data.listings;
-      return listings;
-    } else {
-      throw new Error('Rate limited.');
-    }
-  } catch (error) {
-    throw error;
-  }
-};
-
-Methods.prototype.getJWTFromPricesTF = async function (page, limit) {
-  let tries = 1;
-
-  while (tries <= 3) {
-    try {
-      const response = await axios.post('https://api2.prices.tf/auth/access');
-      if (response.status === 200) {
-        const axiosConfig = {
-          headers: {
-            Authorization: `Bearer ${response.data.accessToken}`,
-          },
-          params: {
-            page: page,
-            limit: limit,
-          },
-        };
-        return axiosConfig;
-      }
-    } catch (error) {
-      // Added in rare case we get rate limited requesting a JWT.
-      if (error?.status === 429 || error?.response?.data.statusCode === 429) {
-        // Retry in 60 seconds.
-        await this.waitXSeconds(60);
-      }
-      console.log('Error occurred getting auth token from prices.tf, retrying...');
-    }
-
-    tries++;
-  }
-
-  throw new Error('An error occurred while getting authenticated with Prices.tf');
-};
-
-Methods.prototype.getKeyPriceFromPricesTF = async function () {
-  try {
-    const axiosConfig = await this.getJWTFromPricesTF(1, 100);
-
-    let tries = 1;
-    while (tries <= 5) {
-      const response = await axios.get('https://api2.prices.tf/prices/5021;6', axiosConfig);
-
-      if (response.status === 200) {
-        const sellMetal = Methods.halfScrapToRefined(response.data.sellHalfScrap);
-        return {
-          metal: sellMetal,
-        };
-      }
-
-      tries++;
-    }
-
-    throw new Error(
-      'Failed to get key price from Baseline. It is either down or we are being rate-limited.'
-    );
-  } catch (error) {
-    throw error;
-  }
-};
-
 Methods.prototype.getKeyFromExternalAPI = async function (
   external_pricelist,
   keyPrice,
@@ -511,31 +414,53 @@ Methods.prototype.getKeyFromExternalAPI = async function (
   };
 };
 
-Methods.prototype.getExternalPricelist = async function () {
-  try {
-    const response = await axios.get('https://autobot.tf/json/pricelist-array');
-    if (!response.data || !Array.isArray(response.data.items) || response.data.items.length === 0) {
-      throw new Error('No items in external pricelist.');
-    }
-    // Cache the fetched pricelist to file
+/**
+ * Get key price from pricelist with PriceDB.io fallback
+ * Always falls back to PriceDB.io if pricelist fails
+ * @param {string} pricelistPath - Path to pricelist.json
+ * @returns {Promise<number>} Key price in refined metal
+ */
+Methods.prototype.getKeyPrice = async function (pricelistPath) {
+  const defaultKeyPrice = 52.22;
+
+  // Try to load from pricelist first
+  if (pricelistPath && fs.existsSync(pricelistPath)) {
     try {
-      await fs.promises.writeFile(CACHE_FILE_PATH, JSON.stringify(response.data, null, 2), 'utf-8');
-    } catch (writeErr) {
-      console.warn(`Failed to write cache file at ${CACHE_FILE_PATH}: ${writeErr.message}`);
-    }
-    return response.data;
-  } catch (err) {
-    console.warn(`Could not fetch external pricelist, falling back to cache: ${err.message}`);
-    try {
-      const cached = await fs.promises.readFile(CACHE_FILE_PATH, 'utf-8');
-      const data = JSON.parse(cached);
-      return data;
-    } catch (cacheErr) {
-      throw new Error(
-        `Failed to fetch external pricelist and no valid cache available: ${cacheErr.message}`
-      );
+      const pricelistData = JSON.parse(fs.readFileSync(pricelistPath, 'utf8'));
+      const keyItem = pricelistData?.items?.find((i) => i.sku === '5021;6');
+      const keyPrice = keyItem?.sell?.metal;
+
+      if (keyPrice && keyPrice > 0 && keyPrice < 1000) {
+        return keyPrice;
+      }
+    } catch (error) {
+      console.log('Could not load key price from pricelist:', error.message);
     }
   }
+
+  // Fall back to PriceDB.io
+  try {
+    console.log('Fetching key price from PriceDB.io...');
+    const response = await fetch('https://pricedb.io/api/item/5021;6', {
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const keyPrice = data?.sell?.metal;
+
+      if (keyPrice && keyPrice > 0 && keyPrice < 1000) {
+        console.log(`Key price from PriceDB.io: ${keyPrice} ref`);
+        return keyPrice;
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to fetch key price from PriceDB.io:', error.message);
+  }
+
+  // Final fallback to default
+  console.log(`Using default key price: ${defaultKeyPrice} ref`);
+  return defaultKeyPrice;
 };
 
 module.exports = Methods;

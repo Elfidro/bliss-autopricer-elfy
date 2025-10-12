@@ -32,6 +32,7 @@ function initBptfWebSocket({
   blockedAttributes,
   logFile,
   onListingUpdate,
+  config,
 }) {
   // Enhanced reconnection options
   const reconnectOptions = {
@@ -49,11 +50,20 @@ function initBptfWebSocket({
     debug: false,
   };
 
-  const rws = new ReconnectingWebSocket(
-    'wss://ws.backpack.tf/events/',
-    undefined,
-    reconnectOptions
-  );
+  // Determine websocket URL based on relay configuration
+  let websocketUrl;
+  if (config?.websocketRelay?.enabled) {
+    const { protocol = 'ws', host = 'localhost', port = 7789 } = config.websocketRelay;
+    websocketUrl = `${protocol}://${host}:${port}/relay`;
+    console.log(`[WebSocket] Using relay server: ${websocketUrl}`);
+    console.log(`[WebSocket] Relay config: ${JSON.stringify(config.websocketRelay, null, 2)}`);
+  } else {
+    websocketUrl = 'wss://ws.backpack.tf/events/';
+    console.log('[WebSocket] Using direct backpack.tf connection');
+  }
+
+  console.log(`[WebSocket] Attempting to connect to: ${websocketUrl}`);
+  const rws = new ReconnectingWebSocket(websocketUrl, undefined, reconnectOptions);
 
   // Health monitoring function
   function startHealthMonitoring() {
@@ -212,7 +222,7 @@ function initBptfWebSocket({
   });
 
   rws.addEventListener('close', (event) => {
-    const msg = `[WebSocket] bptf Socket connection closed. ${event.reason || ''}`;
+    const msg = `[WebSocket] bptf Socket connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason provided'}, Clean: ${event.wasClean}`;
     console.warn(msg);
     logWebSocketEvent(logFile, msg);
 
@@ -221,7 +231,13 @@ function initBptfWebSocket({
   });
 
   rws.addEventListener('error', (event) => {
-    const msg = `[WebSocket] bptf Socket encountered an error: ${event.message || event}`;
+    const errorDetails = {
+      message: event.message || 'No message',
+      error: event.error || 'No error object',
+      type: event.type || 'Unknown type',
+      target: event.target ? event.target.url : 'No target URL',
+    };
+    const msg = `[WebSocket] bptf Socket encountered an error: ${JSON.stringify(errorDetails, null, 2)}`;
     console.error(msg);
     logWebSocketEvent(logFile, msg);
   });

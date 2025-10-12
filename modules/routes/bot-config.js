@@ -81,7 +81,7 @@ module.exports = function (app, configManager) {
       html +=
         '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Steam ID</th>';
       html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Path</th>';
+        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Pricelist Path</th>';
       html +=
         '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Source</th>';
       html +=
@@ -102,7 +102,7 @@ module.exports = function (app, configManager) {
         html += `<td style="padding: 12px; border-bottom: 1px solid #eee;">${isSelected ? '✅ Active' : '⭕ Available'}</td>`;
         html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><strong>${bot.name || 'Unnamed Bot'}</strong></td>`;
         html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><code>${bot.steamId || 'Unknown'}</code></td>`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><small><code>${bot.botPath}</code></small></td>`;
+        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><small><code>${bot.pricelistPath || bot.botPath || 'Not configured'}</code></small></td>`;
         html += `<td style="padding: 12px; border-bottom: 1px solid #eee;">${bot.source || 'unknown'}</td>`;
         html += '<td style="padding: 12px; border-bottom: 1px solid #eee;">';
 
@@ -193,8 +193,14 @@ module.exports = function (app, configManager) {
   // Add bot manually form
   router.get('/add', (req, res) => {
     let html = '<div style="max-width: 800px; margin: 0 auto; padding: 20px;">';
-    html += '<h2>➕ Add Bot Manually</h2>';
-    html += '<p>If auto-discovery did not find your bot, you can add it manually here.</p>';
+    html += '<h2>➕ Configure Bot Paths</h2>';
+    html +=
+      '<p>Enter the direct paths to your bot configuration files. Both paths are required.</p>';
+    html +=
+      '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
+    html +=
+      '<strong>⚠️ Note:</strong> Auto-discovery has been removed for reliability. Please provide exact file paths.';
+    html += '</div>';
 
     html +=
       '<form method="POST" style="background: white; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">';
@@ -203,24 +209,25 @@ module.exports = function (app, configManager) {
       '<label for="name" style="display: block; margin-bottom: 5px; font-weight: bold;">Bot Name:</label>';
     html +=
       '<input type="text" id="name" name="name" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="My Trading Bot">';
+    html += '<small style="color: #666;">A display name for this bot configuration</small>';
     html += '</div>';
 
     html += '<div style="margin-bottom: 15px;">';
     html +=
-      '<label for="tf2autobotPath" style="display: block; margin-bottom: 5px; font-weight: bold;">tf2autobot Installation Path:</label>';
+      '<label for="polldataPath" style="display: block; margin-bottom: 5px; font-weight: bold;">⚠️ Direct Path to polldata.json:</label>';
     html +=
-      '<input type="text" id="tf2autobotPath" name="tf2autobotPath" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="C:\\tf2autobot-5.13.2">';
+      '<input type="text" id="polldataPath" name="polldataPath" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="C:\\tf2autobot\\files\\mybot\\polldata.json">';
     html +=
-      '<small style="color: #666;">Full path to your tf2autobot installation directory</small>';
+      '<small style="color: #666;"><strong>Full absolute path</strong> to your bot\'s polldata.json file (e.g., C:\\tf2autobot\\files\\mybot\\polldata.json)</small>';
     html += '</div>';
 
     html += '<div style="margin-bottom: 15px;">';
     html +=
-      '<label for="botDirectory" style="display: block; margin-bottom: 5px; font-weight: bold;">Bot Directory:</label>';
+      '<label for="pricelistPath" style="display: block; margin-bottom: 5px; font-weight: bold;">⚠️ Direct Path to pricelist.json:</label>';
     html +=
-      '<input type="text" id="botDirectory" name="botDirectory" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="files/mybot">';
+      '<input type="text" id="pricelistPath" name="pricelistPath" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="C:\\tf2autobot\\files\\mybot\\pricelist.json">';
     html +=
-      '<small style="color: #666;">Relative path from tf2autobot directory to your bot\'s files (e.g., files/mybot)</small>';
+      '<small style="color: #666;"><strong>Full absolute path</strong> to your bot\'s pricelist.json file (e.g., C:\\tf2autobot\\files\\mybot\\pricelist.json)</small>';
     html += '</div>';
 
     html += '<div style="margin-bottom: 15px;">';
@@ -228,11 +235,12 @@ module.exports = function (app, configManager) {
       '<label for="steamId" style="display: block; margin-bottom: 5px; font-weight: bold;">Steam ID (optional):</label>';
     html +=
       '<input type="text" id="steamId" name="steamId" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="76561198012345678">';
+    html += '<small style="color: #666;">Your bot\'s Steam ID for reference</small>';
     html += '</div>';
 
     html += '<div style="margin-top: 20px;">';
     html +=
-      '<button type="submit" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Add Bot</button>';
+      '<button type="submit" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Add Bot Configuration</button>';
     html +=
       '<a href="/bot-config" style="background: #6c757d; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Cancel</a>';
     html += '</div>';
@@ -245,20 +253,36 @@ module.exports = function (app, configManager) {
   // Add bot manually POST
   router.post('/add', (req, res) => {
     try {
-      const { name, tf2autobotPath, botDirectory, steamId } = req.body;
+      const { name, polldataPath, pricelistPath, steamId } = req.body;
 
-      if (!name || !tf2autobotPath || !botDirectory) {
+      if (!name || !polldataPath || !pricelistPath) {
         return res
           .status(400)
           .send(
-            renderPage('Error', '<p>Name, tf2autobot path, and bot directory are required</p>')
+            renderPage(
+              'Error',
+              '<p>Bot name, polldata.json path, and pricelist.json path are all required</p>'
+            )
           );
+      }
+
+      // Validate that paths exist
+      const fs = require('fs');
+      if (!fs.existsSync(polldataPath)) {
+        return res
+          .status(400)
+          .send(renderPage('Error', `<p>polldata.json not found at: ${polldataPath}</p>`));
+      }
+      if (!fs.existsSync(pricelistPath)) {
+        return res
+          .status(400)
+          .send(renderPage('Error', `<p>pricelist.json not found at: ${pricelistPath}</p>`));
       }
 
       const bot = configManager.addBot({
         name,
-        tf2autobotPath,
-        botDirectory,
+        polldataPath,
+        pricelistPath,
         steamId: steamId || undefined,
       });
 
@@ -267,6 +291,8 @@ module.exports = function (app, configManager) {
         '<div style="background: #d4edda; border: 1px solid #c3e6cb; padding: 20px; border-radius: 8px; text-align: center;">';
       html += '<h2>✅ Bot Added Successfully</h2>';
       html += `<p><strong>${bot.name}</strong> has been added to your configuration.</p>`;
+      html += `<p>Polldata: <code>${polldataPath}</code></p>`;
+      html += `<p>Pricelist: <code>${pricelistPath}</code></p>`;
       html +=
         '<p><a href="/bot-config" style="background: #007cba; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">← Back to Bot Configuration</a></p>';
       html += '</div>';
@@ -274,7 +300,40 @@ module.exports = function (app, configManager) {
 
       res.send(renderPage('Bot Added', html));
     } catch (err) {
-      res.status(500).send(renderPage('Error', `<p>Failed to add bot: ${err.message}</p>`));
+      res
+        .status(500)
+        .send(
+          renderPage(
+            'Error',
+            `<p>Failed to add bot: ${err instanceof Error ? err.message : String(err)}</p>`
+          )
+        );
+    }
+  });
+
+  // Remove bot
+  router.get('/remove', (req, res) => {
+    try {
+      const botId = req.query.id;
+      if (!botId) {
+        return res.status(400).send(renderPage('Error', '<p>Bot ID is required</p>'));
+      }
+
+      const removedBot = configManager.removeBot(botId);
+
+      let html = '<div style="max-width: 800px; margin: 0 auto; padding: 20px;">';
+      html +=
+        '<div style="background: #d4edda; border: 1px solid #c3e6cb; padding: 20px; border-radius: 8px; text-align: center;">';
+      html += '<h2>✅ Bot Removed</h2>';
+      html += `<p><strong>${removedBot?.name || 'Bot'}</strong> has been removed from your configuration.</p>`;
+      html +=
+        '<p><a href="/bot-config" style="background: #007cba; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">← Back to Bot Configuration</a></p>';
+      html += '</div>';
+      html += '</div>';
+
+      res.send(renderPage('Bot Removed', html));
+    } catch (err) {
+      res.status(500).send(renderPage('Error', `<p>Failed to remove bot: ${err.message}</p>`));
     }
   });
 
