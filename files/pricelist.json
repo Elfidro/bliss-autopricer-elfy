@@ -1,32 +1,46 @@
 {
   "items": [
     {
-      "name": "Strange Australium Minigun",
-      "sku": "202;11;australium",
-      "source": "bptf",
-      "time": 1700348089,
-      "buy": {
-        "keys": 25,
-        "metal": 19.77
-      },
-      "sell": {
-        "keys": 27,
-        "metal": 0.22
-      }
-    },
-    {
       "name": "Mann Co. Supply Crate Key",
       "sku": "5021;6",
       "source": "bptf",
       "buy": {
         "keys": 0,
-        "metal": 52.22
+        "metal": 57.11
       },
       "sell": {
         "keys": 0,
-        "metal": 52.22
+        "metal": 57.11
       },
-      "time": 1756221225
+      "time": 1760307874
+    },
+    {
+      "name": "Tour of Duty Ticket",
+      "sku": "725;6",
+      "source": "bptf",
+      "time": 1760304943,
+      "buy": {
+        "keys": 0,
+        "metal": 28.66
+      },
+      "sell": {
+        "keys": 0,
+        "metal": 31.88
+      }
+    },
+    {
+      "name": "Strange Australium Minigun",
+      "sku": "202;11;australium",
+      "source": "bptf",
+      "time": 1760307875,
+      "buy": {
+        "keys": 21,
+        "metal": 13.44
+      },
+      "sell": {
+        "keys": 22,
+        "metal": 0.55
+      }
     }
   ]
 }

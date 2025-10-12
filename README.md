@@ -7,6 +7,8 @@
 [![Prettier](https://img.shields.io/badge/code_style-Prettier-ff69b4)](https://prettier.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **⚠️ IMPORTANT FOR EXISTING USERS**: If you're upgrading from a previous version, you **MUST** re-scan or re-add your bots after installation. The bot configuration system has been completely overhauled to use direct file paths. Run `npm run setup` or use the web interface at `http://localhost:3000/bot-config` to reconfigure your bots.
+
 <div align="center">
   <img src="https://github.com/jack-richards/bptf-autopricer/assets/58331725/203fe808-30ff-4d7d-868c-a3ef6d31497d" alt="Bliss Autopricer Logo" style="width: 280px; height: 320px;">
 </div>

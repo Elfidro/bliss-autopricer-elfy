@@ -72,51 +72,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA tf2 GRANT ALL ON SEQUENCES TO autopricer;
 
 ## 4. Bot Configuration Setup
 
-### Option A: Automated Setup (Recommended)
+⚠️ **Important Change**: Auto-discovery has been removed for reliability. You will now provide **direct paths** to your bot's configuration files.
 
-```bash
-npm run setup
-```
+### Configure Bot Paths
 
-This command will:
+Bot configuration is now done through the web interface after initial setup. You will need:
 
-- Auto-discover your tf2autobot installations
-- Create and configure multi-bot support
-- Set up database connections
-- Validate your configuration
+1. **Direct path to polldata.json** - Full absolute path (e.g., `C:\tf2autobot\files\mybot\polldata.json`)
+2. **Direct path to pricelist.json** - Full absolute path (e.g., `C:\tf2autobot\files\mybot\pricelist.json`)
 
-### Option B: Manual Configuration
-
-1. Copy the example configuration:
-
-```bash
-cp pricerConfig.json.example pricerConfig.json
-```
-
-2. Edit `pricerConfig.json` with your settings:
-
-```json
-{
-  "selectedBot": "main-bot",
-  "bots": {
-    "main-bot": {
-      "name": "Main Bot",
-      "tf2autobotPath": "/path/to/tf2autobot",
-      "botDirectory": "files/bot1",
-      "description": "Primary trading bot"
-    }
-  },
-  "database": {
-    "host": "localhost",
-    "port": 5432,
-    "database": "tf2autopricer",
-    "user": "autopricer",
-    "password": "your_secure_password"
-  },
-  "port": 3000,
-  "ageThresholdSec": 7200
-}
-```
+These paths will be configured through the web interface at: `http://localhost:3000/bot-config`
 
 ## 5. API Keys Configuration
 
@@ -150,11 +115,14 @@ This will check:
 
 ## 7. Initialize Database Tables
 
-The database tables will be automatically created when you first run the autopricer. You can also manually initialize them using the SQL file:
+Initialize the database tables using the provided SQL file:
 
 ```bash
+# Connect as the autopricer user
 psql -U autopricer -d tf2autopricer -f initialize-db.sql
 ```
+
+**Note**: The SQL file now uses the `autopricer` user instead of `postgres` for schema ownership.
 
 ## 8. Start the Autopricer
 

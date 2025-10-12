@@ -110,6 +110,7 @@ class BotDiscovery {
           const botPath = path.join(filesDir, botDir);
           const configPath = path.join(botPath, 'config.json');
           const pricelistPath = path.join(botPath, 'pricelist.json');
+          const polldataPath = path.join(botPath, 'polldata.json');
 
           if (fs.existsSync(configPath) || fs.existsSync(pricelistPath)) {
             let botName = botDir;
@@ -126,16 +127,21 @@ class BotDiscovery {
               }
             }
 
-            bots.push({
-              id: `${path.basename(tf2autobotPath)}_${botDir}`,
-              name: botName,
-              steamId,
-              tf2autobotPath,
-              botDirectory: botDir,
-              botPath,
-              pricelistPath: fs.existsSync(pricelistPath) ? pricelistPath : null,
-              configPath: fs.existsSync(configPath) ? configPath : null,
-            });
+            // Add bots that have at least pricelist.json
+            // polldata.json is optional (may not exist until bot runs)
+            if (fs.existsSync(pricelistPath)) {
+              bots.push({
+                id: `${path.basename(tf2autobotPath)}_${botDir}`,
+                name: botName,
+                steamId,
+                polldataPath: fs.existsSync(polldataPath) ? polldataPath : null,
+                pricelistPath,
+                // Keep legacy fields for backward compatibility display
+                tf2autobotPath,
+                botDirectory: botDir,
+                botPath,
+              });
+            }
           }
         }
       } catch (err) {

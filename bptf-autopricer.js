@@ -333,56 +333,11 @@ async function getKsItemNamesToPrice(db, allItemNames) {
 const calculateAndEmitPrices = async () => {
   await deleteOldListings(db);
 
-  let itemNames;
-  if (config.priceAllItems) {
-    const pricableSkus = await getPricableItems(db);
-    console.log(`Priceable SKUs from DB:`, pricableSkus.length);
-    console.log(`Key (5021;6) is priceable:`, pricableSkus.includes('5021;6'));
-
-    const pricableSkuSet = new Set(pricableSkus);
-    const skusToPrice = new Set(Array.from(updatedSkus).filter((sku) => pricableSkuSet.has(sku)));
-    console.log(`Updated SKUs:`, Array.from(updatedSkus));
-    console.log(`SKUs to price (updated + priceable):`, Array.from(skusToPrice));
-
-    // Get all item names as usual
-    let allItemNames = await getAllPricedItemNamesWithEffects(
-      external_pricelist,
-      schemaManager,
-      db
-    );
-
-    console.log(`Getting killstreak items`);
-
-    const ksNames = await getKsItemNamesToPrice(db, allItemNames);
-
-    console.log(`Found ${ksNames.length} killstreak items to price.`);
-
-    // Only keep names whose SKU is in the price-able set and has been recently updated
-    itemNames = allItemNames.filter((name) =>
-      skusToPrice.has(schemaManager.schema.getSkuFromName(name))
-    );
-
-    // Always ensure keys are included for pricing regardless of recent updates
-    const keyName = 'Mann Co. Supply Crate Key';
-    if (
-      !itemNames.includes(keyName) &&
-      allItemNames.includes(keyName) &&
-      pricableSkuSet.has('5021;6')
-    ) {
-      itemNames.push(keyName);
-      console.log('Added keys to pricing queue (sufficient listings, forced inclusion)');
-    }
-
-    console.log(`Item names is ${itemNames.length} items before killstreak. `);
-
-    itemNames = [...itemNames, ...ksNames];
-
-    console.log(`Item names is ${itemNames.length} items after killstreak. `);
-
-    updatedSkus.clear();
-  } else {
-    itemNames = Array.from(getAllowedItemNames());
-  }
+  // Only use items added through GUI or item_list.json
+  // priceAllItems functionality removed for public release
+  const itemNames = Array.from(getAllowedItemNames());
+  console.log(`Pricing ${itemNames.length} items from item_list.json and GUI additions`);
+  updatedSkus.clear();
 
   const limit = pLimit(15); // Limit concurrency to 15, adjust as needed
   const priceHistoryEntries = [];
@@ -576,17 +531,18 @@ schemaManager.init(async function (err) {
               );
               return;
             }
-            // Try SCM fallback
-            try {
-              const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
-              const scmPrice = await getSCMPriceObject({
-                name: hashName,
-                keyMetal: keyobj.metal,
-                currency: 'USD',
-                scmMarginBuy: config.scmMarginBuy ?? 0,
-                scmMarginSell: config.scmMarginSell ?? 0,
-              });
-              if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
+            // Try SCM fallback (if enabled)
+            if (config.useScmFallback !== false) {
+              try {
+                const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
+                const scmPrice = await getSCMPriceObject({
+                  name: hashName,
+                  keyMetal: keyobj.metal,
+                  currency: 'USD',
+                  scmMarginBuy: config.scmMarginBuy ?? 0,
+                  scmMarginSell: config.scmMarginSell ?? 0,
+                });
+                if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
                 const item = {
                   name,
                   sku,
@@ -598,8 +554,9 @@ schemaManager.init(async function (err) {
                 emitQueue.enqueue(item);
                 return;
               }
-            } catch (e) {
-              console.warn(`SCM fallback failed for ${name} (${sku}): ${e.message}`);
+              } catch (e) {
+                console.warn(`SCM fallback failed for ${name} (${sku}): ${e.message}`);
+              }
             }
             // Try BPTF fallback
             try {
@@ -662,14 +619,9 @@ schemaManager.init(async function (err) {
     );
   }
 
-  // Only run fallbackForUnpricedItems if both initialSeedUnpriced and priceAllItems are true
-  if (config.initialSeedUnpriced && config.priceAllItems) {
-    // eslint-disable-next-line spellcheck/spell-checker
-    // Note: fallbackForUnpricedItems and emitDefaultBptfPricesForUnpriceableItems have overlapping logic.
-    // Consider refactoring to avoid duplication.
-    await fallbackForUnpricedItems();
-    console.log('Fallback pass for unpriced items complete.');
-  }
+  // priceAllItems functionality has been removed for public release
+  // Users must now add items manually through GUI or file editing
+  console.log('Auto-pricing only items added through GUI or item_list.json');
 });
 
 async function isPriceSwingAcceptable(prev, next, sku) {
@@ -744,24 +696,28 @@ const determinePrice = async (name, sku) => {
         `| UPDATING PRICES |: SCM fallback attempted for keys (${name}, ${sku}) - not allowed.`
       );
     }
-    // Try SCM fallback before BPTF fallback
-    try {
-      // Prefer SKU if available for hash name
-      const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
-      const scmPrice = await getSCMPriceObject({
-        name: hashName,
-        keyMetal: keyobj.metal,
-        currency: 'USD',
-      });
-      if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
-        return [scmPrice.buy, scmPrice.sell];
+    // Try SCM fallback before BPTF fallback (if enabled)
+    if (config.useScmFallback !== false) {
+      try {
+        // Prefer SKU if available for hash name
+        const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
+        const scmPrice = await getSCMPriceObject({
+          name: hashName,
+          keyMetal: keyobj.metal,
+          currency: 'USD',
+        });
+        if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
+          return [scmPrice.buy, scmPrice.sell];
+        }
+      } catch (e) {
+        // SCM fallback failed, continue to BPTF fallback
+        console.warn(
+          `SCM fallback failed for ${name} (${sku}): ${e instanceof Error ? e.message : String(e)}`
+        );
       }
-    } catch (e) {
-      // SCM fallback failed, continue to BPTF fallback
-      console.warn(`SCM fallback failed for ${name} (${sku}): ${e.message}`);
     }
     throw new Error(
-      `| UPDATING PRICES |: Couldn't price ${name}. Item is not priced on bptf or SCM yet, make a suggestion!, therefore we can't compare our average price to its average price.`
+      `| UPDATING PRICES |: Couldn't price ${name}. Item is not priced on bptf, PriceDB, or SCM yet, make a suggestion!, therefore we can't compare our average price to its average price.`
     );
   }
 
@@ -783,20 +739,42 @@ const determinePrice = async (name, sku) => {
         `| UPDATING PRICES |: SCM fallback attempted for keys (${name}, ${sku}) - not allowed.`
       );
     }
-    // Try SCM fallback before BPTF fallback
-    try {
-      const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
-      const scmPrice = await getSCMPriceObject({
-        name: hashName,
-        keyMetal: keyobj.metal,
-        currency: 'USD',
-      });
-      if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
-        console.log(`SCM fallback used for ${name} (${sku}) due to insufficient listings.`);
-        return [scmPrice.buy, scmPrice.sell];
+    // Try PriceDB fallback first if enabled
+    if (config.usePriceDbFallback) {
+      try {
+        const { getPriceDbPrice } = require('./modules/priceDbFetcher');
+        const priceDbData = await getPriceDbPrice(sku);
+        if (priceDbData && (priceDbData.buy.metal > 0 || priceDbData.sell.metal > 0)) {
+          console.log(
+            `PriceDB.io fallback used for ${name} (${sku}) due to insufficient listings.`
+          );
+          return [priceDbData.buy, priceDbData.sell];
+        }
+      } catch (priceDbErr) {
+        console.warn(
+          `PriceDB.io fallback failed for ${name} (${sku}): ${priceDbErr instanceof Error ? priceDbErr.message : String(priceDbErr)}`
+        );
       }
-    } catch (scmErr) {
-      console.warn(`SCM fallback failed for ${name} (${sku}): ${scmErr.message}`);
+    }
+
+    // Try SCM fallback if PriceDB didn't work (if enabled)
+    if (config.useScmFallback !== false) {
+      try {
+        const hashName = sku ? toMarketHashName(sku, schemaManager.schema) : name;
+        const scmPrice = await getSCMPriceObject({
+          name: hashName,
+          keyMetal: keyobj.metal,
+          currency: 'USD',
+        });
+        if (scmPrice && (scmPrice.buy.metal > 0 || scmPrice.sell.metal > 0)) {
+          console.log(`SCM fallback used for ${name} (${sku}) due to insufficient listings.`);
+          return [scmPrice.buy, scmPrice.sell];
+        }
+      } catch (scmErr) {
+        console.warn(
+          `SCM fallback failed for ${name} (${sku}): ${scmErr instanceof Error ? scmErr.message : String(scmErr)}`
+        );
+      }
     }
     if (fallbackOntoPricesTf) {
       const final_buyObj = {

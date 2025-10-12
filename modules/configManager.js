@@ -161,17 +161,16 @@ class ConfigManager {
   }
 
   /**
-   * Add a new bot manually
+   * Add a new bot manually with direct paths
    * @param botConfig
    */
   addBot(botConfig) {
     const bot = {
       id: `manual_${Date.now()}`,
       name: botConfig.name || 'Manual Bot',
-      tf2autobotPath: botConfig.tf2autobotPath,
-      botDirectory: botConfig.botDirectory,
-      botPath: path.join(botConfig.tf2autobotPath, botConfig.botDirectory),
-      pricelistPath: path.join(botConfig.tf2autobotPath, botConfig.botDirectory, 'pricelist.json'),
+      polldataPath: botConfig.polldataPath,
+      pricelistPath: botConfig.pricelistPath,
+      steamId: botConfig.steamId,
       enabled: true,
       source: 'manual',
       ...botConfig,
@@ -211,17 +210,30 @@ class ConfigManager {
     const discoveryResults = this.discovery.discover();
 
     // Add newly discovered bots (avoid duplicates)
-    const existingPaths = new Set(this.config.bots.map((bot) => bot.botPath));
+    // Check for duplicates using pricelistPath or steamId
+    const existingBots = new Set(
+      this.config.bots.map((bot) => bot.pricelistPath || bot.steamId).filter(Boolean)
+    );
 
+    let addedCount = 0;
     for (const bot of discoveryResults.bots) {
-      if (!existingPaths.has(bot.botPath)) {
+      const identifier = bot.pricelistPath || bot.steamId;
+      if (identifier && !existingBots.has(identifier)) {
         this.config.bots.push({
-          ...bot,
+          id: bot.id,
+          name: bot.name,
+          steamId: bot.steamId,
+          polldataPath: bot.polldataPath,
+          pricelistPath: bot.pricelistPath,
           enabled: true,
           source: 'discovery',
         });
+        addedCount++;
+        console.log(`✅ Added discovered bot: ${bot.name} (${bot.steamId})`);
       }
     }
+
+    console.log(`📊 Discovery complete: Found ${discoveryResults.bots.length} bots, added ${addedCount} new bots`);
 
     this.config.discovery = {
       lastRun: new Date().toISOString(),

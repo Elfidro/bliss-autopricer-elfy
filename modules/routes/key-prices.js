@@ -12,12 +12,29 @@ module.exports = (app) => {
         ORDER BY created_at ASC
       `);
 
+      // Handle empty data gracefully
+      if (!data || data.length === 0) {
+        let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
+        html +=
+          '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; text-align: center;">';
+        html += '<h2>📊 No Key Price Data Available</h2>';
+        html +=
+          '<p>No key prices have been recorded in the last 14 days. The system needs to run for a while to collect data.</p>';
+        html += '<p>Key prices are automatically updated by the autopricer.</p>';
+        html +=
+          '<p><a href="/" style="background: #007cba; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">← Back to Dashboard</a></p>';
+        html += '</div>';
+        html += '</div>';
+        return res.send(renderPage('Key Prices', html));
+      }
+
       const timestamps = data.map((p) => new Date(p.timestamp * 1000).toLocaleString());
       const buyPrices = data.map((p) => parseFloat(p.buy_price_metal));
       const sellPrices = data.map((p) => parseFloat(p.sell_price_metal));
 
-      const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+      const mean = (arr) => (arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
       const stdDev = (arr) => {
+        if (arr.length === 0) return 0;
         const avg = mean(arr);
         return Math.sqrt(arr.map((x) => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / arr.length);
       };

@@ -45,7 +45,7 @@ function mountRoutes() {
   require('./routes/bot-config')(app, configManager);
 
   // Add new dashboard and settings routes
-  require('./routes/dashboard')(app);
+  require('./routes/dashboard')(app, configManager);
   require('./routes/settings')(app);
 }
 

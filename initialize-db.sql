@@ -1,4 +1,7 @@
-CREATE SCHEMA tf2 AUTHORIZATION postgres;
+-- Run this script after creating the 'autopricer' user and 'tf2autopricer' database
+-- Connect to the database first: \c tf2autopricer
+
+CREATE SCHEMA IF NOT EXISTS tf2 AUTHORIZATION autopricer;
 
 CREATE TABLE tf2.listings (
   name character varying NOT NULL,

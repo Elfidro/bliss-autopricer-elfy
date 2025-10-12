@@ -161,23 +161,31 @@ curl -I http://localhost:3000
 - "No bot selected" errors
 - Bot not found in interface
 - Configuration not loading
+- "File does not exist" errors
 
 **Solutions**:
 
-1. **Re-run Setup**:
+1. **Use the Bot Configuration GUI**:
+   - Navigate to `http://localhost:3000` and click "Bot Configuration"
+   - Click "Add New Bot"
+   - Provide the **direct absolute paths** to your bot's files:
+     - `polldata.json` path (e.g., `C:/tf2autobot/files/bot1/polldata.json`)
+     - `pricelist.json` path (e.g., `C:/tf2autobot/files/bot1/pricelist.json`)
+     - Bot's Steam ID (64-bit format)
+   - Click "Add Bot"
 
-   ```bash
-   npm run setup
+2. **Verify File Paths**:
+
+   ```powershell
+   # Windows - Check if files exist
+   Test-Path "C:\tf2autobot\files\bot1\polldata.json"
+   Test-Path "C:\tf2autobot\files\bot1\pricelist.json"
    ```
-
-2. **Verify Bot Paths**:
-
+   
    ```bash
-   # Check if bot directory exists
-   ls -la /path/to/tf2autobot/files/bot1/
-
-   # Verify config.json exists
-   cat /path/to/tf2autobot/files/bot1/config.json
+   # Linux/macOS
+   ls -la /path/to/tf2autobot/files/bot1/polldata.json
+   ls -la /path/to/tf2autobot/files/bot1/pricelist.json
    ```
 
 3. **Check Configuration Format**:
@@ -187,15 +195,16 @@ curl -I http://localhost:3000
    node -e "console.log(JSON.parse(require('fs').readFileSync('pricerConfig.json')))"
    ```
 
-4. **Manual Configuration**:
+4. **Manual Configuration** (if GUI doesn't work):
    ```json
    {
      "selectedBot": "main-bot",
      "bots": {
        "main-bot": {
          "name": "Main Bot",
-         "tf2autobotPath": "/correct/path/to/tf2autobot",
-         "botDirectory": "files/bot1"
+         "polldataPath": "C:/tf2autobot/files/bot1/polldata.json",
+         "pricelistPath": "C:/tf2autobot/files/bot1/pricelist.json",
+         "steamId": "76561198012345678"
        }
      }
    }
@@ -208,6 +217,7 @@ curl -I http://localhost:3000
 - No prices being generated
 - Outdated prices
 - Missing items in pricelist
+- Fallback pricing not working
 
 **Solutions**:
 
@@ -218,24 +228,33 @@ curl -I http://localhost:3000
    node -e "console.log(JSON.parse(require('fs').readFileSync('files/item_list.json')))"
    ```
 
-2. **Check API Connectivity**:
+2. **Enable PriceDB Fallback**:
+   - Navigate to `http://localhost:3000/settings`
+   - Check the "Use PriceDB.io Fallback" checkbox
+   - This provides backup pricing when backpack.tf listings are insufficient
+   - PriceDB is tried first, then Steam Community Market if item not found
+
+3. **Check API Connectivity**:
 
    ```bash
    # Test backpack.tf API
    curl "https://backpack.tf/api/classifieds/search/v1?sku=5021;6"
+   
+   # Test PriceDB.io API
+   curl "https://pricedb.io/api/item/5021;6"
    ```
 
-3. **Review Logs**:
+4. **Review Logs**:
 
    ```bash
    # Check for pricing errors
    tail -f logs/autopricer.log | grep -i error
    ```
 
-4. **Manual Price Update**:
-   - Use web interface to manually add items
+5. **Manual Price Update**:
+   - Use web interface to manually add items via the dashboard
    - Check if specific items are causing issues
-   - Verify item SKUs are correct
+   - Verify item SKUs are correct format
 
 ### 🐛 Application Crashes
 
