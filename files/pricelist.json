@@ -12,7 +12,7 @@
         "keys": 0,
         "metal": 57.11
       },
-      "time": 1760307874
+      "time": 1760312950
     },
     {
       "name": "Tour of Duty Ticket",
@@ -32,14 +32,14 @@
       "name": "Strange Australium Minigun",
       "sku": "202;11;australium",
       "source": "bptf",
-      "time": 1760307875,
+      "time": 1760312951,
       "buy": {
         "keys": 21,
-        "metal": 13.44
+        "metal": 17.88
       },
       "sell": {
         "keys": 22,
-        "metal": 0.55
+        "metal": 0.33
       }
     }
   ]

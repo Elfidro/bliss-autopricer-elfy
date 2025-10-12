@@ -5,7 +5,13 @@ const bodyParser = require('body-parser');
 const ConfigManager = require('./configManager');
 
 const app = express();
-app.use(bodyParser.urlencoded({ extended: true })); // Changed to true to support array fields
+// Increase body parser limits for large pricelists and parameter arrays
+app.use(bodyParser.urlencoded({ 
+  extended: true, 
+  limit: '50mb', 
+  parameterLimit: 1000000 
+}));
+app.use(bodyParser.json({ limit: '50mb' }));
 
 const CONFIG_PATH = path.resolve(__dirname, '../pricerConfig.json');
 const configManager = new ConfigManager(CONFIG_PATH);
