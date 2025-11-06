@@ -385,35 +385,6 @@ Methods.prototype.addToPricelist = function (item, PRICELIST_PATH) {
   }
 };
 
-// Request related methods.
-Methods.prototype.getKeyFromExternalAPI = async function (
-  external_pricelist,
-  keyPrice,
-  schemaManager
-) {
-  // Always use the backpack.tf cached pricelist for the key price
-  const { pricetfItem } = this.getItemPriceFromExternalPricelist(
-    '5021;6',
-    external_pricelist,
-    keyPrice,
-    schemaManager
-  );
-  return {
-    name: 'Mann Co. Supply Crate Key',
-    sku: '5021;6',
-    source: 'bptf',
-    buy: {
-      keys: pricetfItem.buy.keys,
-      metal: pricetfItem.buy.metal,
-    },
-    sell: {
-      keys: pricetfItem.sell.keys,
-      metal: pricetfItem.sell.metal,
-    },
-    time: Math.floor(Date.now() / 1000),
-  };
-};
-
 /**
  * Get key price from pricelist with PriceDB.io fallback
  * Always falls back to PriceDB.io if pricelist fails
@@ -439,10 +410,17 @@ Methods.prototype.getKeyPrice = async function (pricelistPath) {
   }
 
   // Fall back to PriceDB.io
+  const { getBaseConfigManager } = require('./modules/baseConfigManager');
+  const config = getBaseConfigManager().getConfig();
+  const apiSettings = config.apiSettings || { 
+    priceDbBaseUrl: 'https://pricedb.io/api',
+    priceDbTimeout: 5000
+  };
+
   try {
     console.log('Fetching key price from PriceDB.io...');
-    const response = await fetch('https://pricedb.io/api/item/5021;6', {
-      signal: AbortSignal.timeout(5000),
+    const response = await fetch(`${apiSettings.priceDbBaseUrl}/item/5021;6`, {
+      signal: AbortSignal.timeout(apiSettings.priceDbTimeout),
     });
 
     if (response.ok) {

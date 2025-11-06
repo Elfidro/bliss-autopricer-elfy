@@ -2,10 +2,14 @@ const path = require('path');
 const express = require('express');
 const { loadJson } = require('../utils');
 const renderPage = require('../layout');
+const { getBaseConfigManager } = require('../baseConfigManager');
 
 module.exports = function (app, config, configManager) {
   const router = express.Router();
   const thresholdSec = config.ageThresholdSec;
+  
+  const baseConfig = getBaseConfigManager().getConfig();
+  const externalLinks = baseConfig.externalLinks || { autobotTfBaseUrl: 'http://autobot.tf' };
 
   // Helper function to get current bot paths
   function getBotPaths() {
@@ -140,7 +144,7 @@ module.exports = function (app, config, configManager) {
       `;
 
       tbl += `<tr class="${rowClass}" data-age="${item.age}" data-inbot="${inBot}" style="${rowStyle}">`;
-      tbl += `<td class="name" style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;">${item.name}</td>`;
+      tbl += `<td class="name" style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;"><a href="${externalLinks.autobotTfBaseUrl}/items/${sku}" style="color:#495057; text-decoration: none;" target="_blank" title="View ${item.name} on autobot.tf">${item.name} 🔗</a></td>`;
       tbl += `<td class="sku" style="padding: 12px; border-bottom: 1px solid #eee;"><code style="background: #f8f9fa; padding: 2px 4px; border-radius: 3px; font-size: 11px;">${sku}</code></td>`;
       tbl += `<td style="padding: 12px; border-bottom: 1px solid #eee; text-align: center; font-size: 12px;">${last}</td>`;
 

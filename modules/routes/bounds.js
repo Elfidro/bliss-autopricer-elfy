@@ -2,10 +2,15 @@ const path = require('path');
 const express = require('express');
 const { loadJson, saveJson } = require('../utils');
 const renderPage = require('../layout');
+const { getBaseConfigManager } = require('../baseConfigManager');
 
 module.exports = function (app) {
   const router = express.Router();
   const itemListPath = path.resolve(__dirname, '../../files/item_list.json');
+  const priceListPath = path.resolve(__dirname, '../../files/pricelist.json');
+  
+  const config = getBaseConfigManager().getConfig();
+  const externalLinks = config.externalLinks || { autobotTfBaseUrl: 'http://autobot.tf' };
 
   function buildBoundsTable(items) {
     if (items.length === 0) {
@@ -30,10 +35,8 @@ module.exports = function (app) {
               <thead>
                 <tr style="background: #f8f9fa;">
                   <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; min-width: 200px;">Item Name</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #28a745;" colspan="2">🟢 Buy Limits</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #28a745;" colspan="2">🟢 Buy Limits</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #dc3545;" colspan="2">🔴 Sell Limits</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #dc3545;" colspan="2">🔴 Sell Limits</th>
+                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #28a745;" colspan="4">🟢 Buy Limits</th>
+                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #dc3545;" colspan="4">🔴 Sell Limits</th>
                 </tr>
                 <tr style="background: #f8f9fa; font-size: 0.9em;">
                   <th style="padding: 8px; border-bottom: 1px solid #ddd;"></th>
@@ -51,9 +54,16 @@ module.exports = function (app) {
 
     items.forEach((item, idx) => {
       const rowStyle = idx % 2 === 0 ? 'background: #f9f9f9;' : '';
+      
+      // Build the item name cell with optional autobot.tf link if SKU is available
+      let itemNameHtml = item.name;
+      if (item.sku) {
+        itemNameHtml = `<a href="${externalLinks.autobotTfBaseUrl}/items/${item.sku}" style="color:#495057; text-decoration: none;" target="_blank" title="View ${item.name} on autobot.tf">${item.name} 🔗</a>`;
+      }
+      
       tbl += `
         <tr style="${rowStyle}">
-          <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;">${item.name}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;">${itemNameHtml}</td>
           <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
             <input type="number" step="1" name="minBuyKeys_${idx}" value="${item.minBuyKeys ?? ''}" 
                    style="width: 60px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
@@ -116,6 +126,19 @@ module.exports = function (app) {
 
   router.get('/bounds', (req, res) => {
     const itemList = loadJson(itemListPath).items || [];
+    const priceList = loadJson(priceListPath).items || [];
+    
+    // Create a map of item names to SKUs for efficient lookup
+    const nameToSkuMap = new Map();
+    priceList.forEach(priceItem => {
+      nameToSkuMap.set(priceItem.name, priceItem.sku);
+    });
+    
+    // Enrich item list with SKU data
+    const enrichedItemList = itemList.map(item => ({
+      ...item,
+      sku: nameToSkuMap.get(item.name) || null
+    }));
 
     let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
 
@@ -131,9 +154,10 @@ module.exports = function (app) {
     html +=
       '<div style="background: #e8f4fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
     html += '<h3>📊 Configuration Summary</h3>';
-    html += `<p><strong>Total Items:</strong> ${itemList.length}</p>`;
+    html += `<p><strong>Total Items:</strong> ${enrichedItemList.length}</p>`;
+    html += `<p><strong>Items with Price Data:</strong> ${enrichedItemList.filter(i => i.sku).length}</p>`;
 
-    const boundsConfigured = itemList.filter(
+    const boundsConfigured = enrichedItemList.filter(
       (item) =>
         item.minBuyKeys !== undefined ||
         item.minBuyMetal !== undefined ||
@@ -146,7 +170,7 @@ module.exports = function (app) {
     ).length;
 
     html += `<p><strong>Items with Bounds:</strong> ${boundsConfigured}</p>`;
-    html += `<p><strong>Items without Bounds:</strong> ${itemList.length - boundsConfigured}</p>`;
+    html += `<p><strong>Items without Bounds:</strong> ${enrichedItemList.length - boundsConfigured}</p>`;
     html += '</div>';
 
     // Instructions Card
@@ -162,10 +186,12 @@ module.exports = function (app) {
       '<li><strong>Keys vs Metal:</strong> Use keys for high-value items, metal for low-value items</li>';
     html +=
       '<li><strong>Leave Blank:</strong> No limit will be applied for that price boundary</li>';
+    html +=
+      '<li><strong>🔗 Icon:</strong> Click the link icon next to item names to view current market prices on autobot.tf</li>';
     html += '</ul>';
     html += '</div>';
 
-    html += buildBoundsTable(itemList);
+    html += buildBoundsTable(enrichedItemList);
     html += '</div>';
 
     res.send(renderPage('Price Bounds Configuration', html));

@@ -1,5 +1,6 @@
 // Use built-in fetch (Node.js 18+) or fall back to node-fetch for older versions
 const fetch = globalThis.fetch || require('node-fetch');
+const { getBaseConfigManager } = require('./baseConfigManager');
 
 /**
  * Fetches price data from pricedb.io for a given SKU
@@ -7,11 +8,17 @@ const fetch = globalThis.fetch || require('node-fetch');
  * @returns {Promise<{name: string, sku: string, source: string, time: number, buy: {keys: number, metal: number}, sell: {keys: number, metal: number}}|null>}
  */
 async function getPriceDbPrice(sku) {
-  const url = `https://pricedb.io/api/item/${encodeURIComponent(sku)}`;
+  const config = getBaseConfigManager().getConfig();
+  const apiSettings = config.apiSettings || {
+    priceDbBaseUrl: 'https://pricedb.io/api',
+    priceDbTimeout: 5000,
+  };
+
+  const url = `${apiSettings.priceDbBaseUrl}/item/${encodeURIComponent(sku)}`;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), apiSettings.priceDbTimeout);
 
     const res = await fetch(url, {
       signal: controller.signal,
@@ -63,9 +70,12 @@ async function getPriceDbPrice(sku) {
  * @returns {Promise<Map<string, object>>} - Map of SKU to price data
  */
 async function getPriceDbPrices(skus) {
+  const config = getBaseConfigManager().getConfig();
+  const concurrentLimit = config.apiSettings?.concurrentRequestLimit || 3;
+
   const results = new Map();
   const limit = require('p-limit').default;
-  const limiter = limit(3); // Limit to 3 concurrent requests
+  const limiter = limit(concurrentLimit);
 
   await Promise.all(
     skus.map((sku) =>

@@ -11,6 +11,7 @@
     "password": "your_password_here"
   },
   "pricerPort": 3456,
+  "minListingCount": 3,
   "maxPercentageDifferences": {
     "buy": 5,
     "sell": -8
@@ -114,6 +115,23 @@
     "port": 7789,
     "protocol": "ws"
   },
+  "schedulerIntervals": {
+    "updatePricelist": 1800000,
+    "calculatePrices": 900000,
+    "updateKeyPrice": 900000,
+    "updateMovingAverages": 900000
+  },
+  "apiSettings": {
+    "priceDbBaseUrl": "https://pricedb.io/api",
+    "priceDbTimeout": 5000,
+    "keyPriceTimeout": 10000,
+    "concurrentRequestLimit": 3
+  },
+  "externalLinks": {
+    "autobotTfBaseUrl": "http://autobot.tf",
+    "chartJsCdnUrl": "https://cdn.jsdelivr.net/npm/chart.js"
+  },
+  "emitQueueInterval": 20,
   "testValue": "Hello World",
   "fallbackOntoPricesTf": false
 }

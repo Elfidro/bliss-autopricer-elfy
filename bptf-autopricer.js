@@ -25,11 +25,7 @@ const emitQueue = new EmitQueue(socketIO, 5); // 5ms between emits
 emitQueue.start();
 
 const {
-  sendPriceAlert,
-  cleanupOldKeyPrices,
-  insertKeyPrice,
-  adjustPrice,
-  checkKeyPriceStability,
+  fetchKeyPriceFromPriceDB,
 } = require('./modules/keyPriceUtils');
 
 const { updateMovingAverages, updateListingStats } = require('./modules/listingAverages');
@@ -121,28 +117,30 @@ schemaManager.on('schema', function (schema) {
   fs.writeFileSync(SCHEMA_PATH, JSON.stringify(schema.toJSON()));
 });
 
-var keyobj;
-var external_pricelist;
+let keyobj;
+let external_pricelist;
 
 const updateKeyObject = async () => {
-  // Always use backpack.tf for key price
-  const key_item = await Methods.getKeyFromExternalAPI(
-    external_pricelist,
-    external_pricelist['5021;6']?.value || 0,
-    schemaManager
-  );
+  try {
+    // Fetch key price directly from pricedb.io
+    const key_item = await fetchKeyPriceFromPriceDB();
 
-  console.log(`Key item fetched: ${JSON.stringify(key_item)}`);
+    console.log(`Key item fetched from pricedb.io: ${JSON.stringify(key_item)}`);
 
-  await new Promise((res) => setTimeout(res, 1000)); // Wait 1 second
+    // Add to pricelist
+    Methods.addToPricelist(key_item, PRICELIST_PATH);
 
-  Methods.addToPricelist(key_item, PRICELIST_PATH);
+    // Update keyobj for internal use
+    keyobj = {
+      metal: key_item.sell.metal,
+    };
 
-  keyobj = {
-    metal: key_item.sell.metal,
-  };
-
-  socketIO.emit('price', key_item);
+    // Emit the price update
+    socketIO.emit('price', key_item);
+  } catch (error) {
+    console.error('Failed to update key price from pricedb.io:', error);
+    // If we fail, we'll retry on the next scheduled update
+  }
 };
 
 const { initBptfWebSocket } = require('./websocket/bptfWebSocket');
@@ -154,10 +152,11 @@ const { watchItemList, getAllowedItemNames, getItemBounds, allowAllItems } = ite
 watchItemList();
 
 async function getPricableItems(db) {
+  const minListings = config.minListingCount || 3;
   const rows = await db.any(`
     SELECT sku FROM listing_stats
-    WHERE current_buy_count > 3 AND current_sell_count > 3
-  `);
+    WHERE current_buy_count > $1 AND current_sell_count > $1
+  `, [minListings]);
   return rows.map((r) => r.sku);
 }
 
@@ -240,11 +239,12 @@ const KILLSTREAK_TIERS = {
 
 async function getKsItemNamesToPrice(db, allItemNames) {
   console.log(`Getting killstreak items with enough listings...`);
+  const minListings = config.minListingCount || 3;
   const rows = await db.any(`
     SELECT sku FROM listing_stats
     WHERE (sku LIKE '%;kt-1' OR sku LIKE '%;kt-2' OR sku LIKE '%;kt-3')
-      AND current_buy_count > 3 AND current_sell_count > 3
-  `);
+      AND current_buy_count > $1 AND current_sell_count > $1
+  `, [minListings]);
   console.log(`Found ${rows.length} killstreak items with enough listings.`);
 
   // Build a map from baseSku (defindex + qualities except kt/effect) to name
@@ -350,46 +350,26 @@ const calculateAndEmitPrices = async () => {
       limit(async () => {
         try {
           let sku = schemaManager.schema.getSkuFromName(name);
+          
+          // Skip the key entirely - it's handled by updateKeyObject via pricedb.io
+          if (sku === '5021;6') {
+            return;
+          }
+
           let arr = await determinePrice(name, sku);
           let result = await finalisePrice(arr, name, sku);
 
-          // Special handling for keys - log more details
-          if (sku === '5021;6') {
-            console.log(`Key processing: name=${name}, sku=${sku}`);
-            console.log(`Key arr result:`, arr);
-            console.log(`Key finalise result:`, result);
-          }
-
           let item = result?.item;
           if (!result || !result.item) {
-            if (sku === '5021;6') {
-              console.warn(`Key processing failed: no result or item from finalisePrice`);
-            }
             return;
           }
           if (
             (item.buy.keys === 0 && item.buy.metal === 0) ||
             (item.sell.keys === 0 && item.sell.metal === 0)
           ) {
-            if (sku === '5021;6') {
-              console.warn(
-                `Key processing failed: zero prices - buy: ${JSON.stringify(item.buy)}, sell: ${JSON.stringify(item.sell)}`
-              );
-            }
             return;
           }
-          // If the item is key add to the right place and skip it.
-          if (sku === '5021;6') {
-            const buyPrice = item.buy.metal;
-            const sellPrice = item.sell.metal;
-            const timestamp = Math.floor(Date.now() / 1000);
-            console.log(
-              `Inserting key price: buy=${buyPrice}, sell=${sellPrice}, timestamp=${timestamp}`
-            );
-            await insertKeyPrice(db, keyobj, buyPrice, sellPrice, timestamp);
-            console.log(`Key price insertion completed`);
-            return;
-          }
+
           itemsToWrite.push(item);
           priceHistoryEntries.push(result.priceHistory);
           emitQueue.enqueue(item);
@@ -444,49 +424,22 @@ schemaManager.init(async function (err) {
 
   // Get external pricelist.
   external_pricelist = await getBptfPrices(); //await Methods.getExternalPricelist();
-  // Update key object.
+  // Update key object from pricedb.io
   await updateKeyObject();
-  console.log(`Key object initialised to bptf base: ${JSON.stringify(keyobj)}`);
+  console.log(`Key object initialised from pricedb.io: ${JSON.stringify(keyobj)}`);
   // Get external pricelist.
-  //external_pricelist = await Methods.getExternalPricelist();
+  external_pricelist = await getBptfPrices();
   // Calculate and emit prices on start up.
   await calculateAndEmitPrices();
   console.log('Prices calculated and emitted on startup.');
-  // Call this once at start-up if needed
-  //await initializeListingStats(db);
-  //console.log('Listing stats initialized.');
-  //InitialKeyPricingContinued
-  await checkKeyPriceStability({
-    db,
-    Methods,
-    keyobj,
-    adjustPrice,
-    sendPriceAlert,
-    PRICELIST_PATH,
-    socketIO,
-  });
-  console.log('Key price stability check completed.');
 
   // Start scheduled tasks after everything is ready
   scheduleTasks({
     updateExternalPricelist: async () => {
-      external_pricelist = await getBptfPrices(true); //await Methods.getExternalPricelist();
+      external_pricelist = await getBptfPrices(true);
     },
     calculateAndEmitPrices,
-    cleanupOldKeyPrices: async (db) => {
-      await cleanupOldKeyPrices(db);
-    },
-    checkKeyPriceStability: async () => {
-      await checkKeyPriceStability({
-        db,
-        Methods,
-        keyobj,
-        adjustPrice,
-        sendPriceAlert,
-        PRICELIST_PATH,
-        socketIO,
-      });
-    },
+    updateKeyObject, // Update key price from pricedb.io
     updateMovingAverages: async (db, pgp) => {
       await updateMovingAverages(db, pgp);
     },

@@ -1,11 +1,20 @@
 const EventEmitter = require('events');
+const { getBaseConfigManager } = require('./baseConfigManager');
 
 class EmitQueue extends EventEmitter {
-  constructor(socketIO, intervalMs = 20) {
+  constructor(socketIO, intervalMs = null) {
     super();
     this.queue = [];
     this.socketIO = socketIO;
-    this.intervalMs = intervalMs;
+    
+    // Use provided interval or get from config
+    if (intervalMs === null) {
+      const config = getBaseConfigManager().getConfig();
+      this.intervalMs = config.emitQueueInterval || 20;
+    } else {
+      this.intervalMs = intervalMs;
+    }
+    
     this.running = false;
   }
 
