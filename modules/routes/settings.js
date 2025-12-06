@@ -4,6 +4,21 @@ const renderPage = require('../layout');
 const { loadJson, saveJson } = require('../utils');
 const { getBaseConfigManager } = require('../baseConfigManager');
 
+/**
+ * Parse float from string, handling both comma and period as decimal separator
+ * This fixes issues with European locales where browsers submit "1,5" instead of "1.5"
+ * @param {string} value - The value to parse
+ * @returns {number} - Parsed float or NaN if invalid
+ */
+function parseFloatLocale(value) {
+  if (typeof value === 'number') return value;
+  if (!value || typeof value !== 'string') return NaN;
+  
+  // Replace comma with period for European locale support
+  const normalized = value.trim().replace(',', '.');
+  return parseFloat(normalized);
+}
+
 module.exports = function (app) {
   const router = express.Router();
 
@@ -185,6 +200,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Min Sell Margin:</label>
         <input type="number" name="min_sell_margin" value="${config.minSellMargin || 0.11}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                min="0" max="1" step="0.01">
         <small style="color: #666;">Minimum profit margin for selling (0.11 = 11%)</small>
@@ -192,6 +208,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">SCM Margin Buy:</label>
         <input type="number" name="scm_margin_buy" value="${config.scmMarginBuy ?? 0}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                step="0.01">
         <small style="color: #666;">Steam Community Market margin for buy prices</small>
@@ -199,6 +216,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">SCM Margin Sell:</label>
         <input type="number" name="scm_margin_sell" value="${config.scmMarginSell ?? 0}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                step="0.01">
         <small style="color: #666;">Steam Community Market margin for sell prices</small>
@@ -355,6 +373,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Buy Increase:</label>
         <input type="number" name="max_buy_increase" value="${config.priceSwingLimits?.maxBuyIncrease || 0.1}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                min="0" max="1" step="0.01">
         <small style="color: #666;">Maximum buy price increase per update (0.1 = 10%)</small>
@@ -362,6 +381,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Sell Decrease:</label>
         <input type="number" name="max_sell_decrease" value="${config.priceSwingLimits?.maxSellDecrease || 0.1}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                min="0" max="1" step="0.01">
         <small style="color: #666;">Maximum sell price decrease per update (0.1 = 10%)</small>
@@ -381,6 +401,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Buy Difference:</label>
         <input type="number" name="max_percentage_diff_buy" value="${config.maxPercentageDifferences?.buy ?? 5}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                step="0.1">
         <small style="color: #666;">Maximum % buy price can differ from BPTF (5 = 5%)</small>
@@ -388,6 +409,7 @@ module.exports = function (app) {
       html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Max Sell Difference:</label>
         <input type="number" name="max_percentage_diff_sell" value="${config.maxPercentageDifferences?.sell ?? -8}" 
+               lang="en" inputmode="decimal"
                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
                step="0.1">
         <small style="color: #666;">Maximum % sell price can differ from BPTF (-8 = -8%)</small>
@@ -495,25 +517,34 @@ module.exports = function (app) {
 
       // Update application settings
       config.pricerPort = parseInt(req.body.pricer_port) || 3456;
-      config.minSellMargin = parseFloat(req.body.min_sell_margin) || 0.11;
+      config.minSellMargin = parseFloatLocale(req.body.min_sell_margin) || 0.11;
 
       // Update SCM margins
-      config.scmMarginBuy = parseFloat(req.body.scm_margin_buy) || 0;
-      config.scmMarginSell = parseFloat(req.body.scm_margin_sell) || 0;
+      config.scmMarginBuy = parseFloatLocale(req.body.scm_margin_buy) || 0;
+      config.scmMarginSell = parseFloatLocale(req.body.scm_margin_sell) || 0;
 
       // Update price swing limits
       if (!config.priceSwingLimits) {
         config.priceSwingLimits = {};
       }
-      config.priceSwingLimits.maxBuyIncrease = parseFloat(req.body.max_buy_increase) || 0.1;
-      config.priceSwingLimits.maxSellDecrease = parseFloat(req.body.max_sell_decrease) || 0.1;
+      config.priceSwingLimits.maxBuyIncrease = parseFloatLocale(req.body.max_buy_increase) || 0.1;
+      config.priceSwingLimits.maxSellDecrease = parseFloatLocale(req.body.max_sell_decrease) || 0.1;
 
       // Update max percentage differences
       if (!config.maxPercentageDifferences) {
         config.maxPercentageDifferences = {};
       }
-      config.maxPercentageDifferences.buy = parseFloat(req.body.max_percentage_diff_buy) ?? 5;
-      config.maxPercentageDifferences.sell = parseFloat(req.body.max_percentage_diff_sell) ?? -8;
+      config.maxPercentageDifferences.buy = parseFloatLocale(req.body.max_percentage_diff_buy) ?? 5;
+      config.maxPercentageDifferences.sell = parseFloatLocale(req.body.max_percentage_diff_sell) ?? -8;
+
+      // Log parsed values for debugging locale issues
+      console.log('[Settings] Parsed decimal values:', {
+        minSellMargin: { input: req.body.min_sell_margin, parsed: config.minSellMargin },
+        maxBuyIncrease: { input: req.body.max_buy_increase, parsed: config.priceSwingLimits.maxBuyIncrease },
+        maxSellDecrease: { input: req.body.max_sell_decrease, parsed: config.priceSwingLimits.maxSellDecrease },
+        maxPercentBuy: { input: req.body.max_percentage_diff_buy, parsed: config.maxPercentageDifferences.buy },
+        maxPercentSell: { input: req.body.max_percentage_diff_sell, parsed: config.maxPercentageDifferences.sell }
+      });
 
       // Update trading settings
       config.usePriceDbFallback = req.body.use_pricedb_fallback === 'on';
