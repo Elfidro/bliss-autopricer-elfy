@@ -385,14 +385,55 @@ Methods.prototype.addToPricelist = function (item, PRICELIST_PATH) {
   }
 };
 
+// Request related methods.
+Methods.prototype.getKeyFromExternalAPI = async function (
+  external_pricelist,
+  keyPrice,
+  schemaManager
+) {
+  // Always use the backpack.tf cached pricelist for the key price
+  const { pricetfItem } = this.getItemPriceFromExternalPricelist(
+    '5021;6',
+    external_pricelist,
+    keyPrice,
+    schemaManager
+  );
+  return {
+    name: 'Mann Co. Supply Crate Key',
+    sku: '5021;6',
+    source: 'bptf',
+    buy: {
+      keys: pricetfItem.buy.keys,
+      metal: pricetfItem.buy.metal,
+    },
+    sell: {
+      keys: pricetfItem.sell.keys,
+      metal: pricetfItem.sell.metal,
+    },
+    time: Math.floor(Date.now() / 1000),
+  };
+};
+
+// Cache for key price with 5-minute expiration
+let keyPriceCache = null;
+let keyPriceCacheTime = 0;
+const KEY_PRICE_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+
 /**
  * Get key price from pricelist with PriceDB.io fallback
  * Always falls back to PriceDB.io if pricelist fails
+ * Caches the result for 5 minutes to prevent excessive API calls
  * @param {string} pricelistPath - Path to pricelist.json
  * @returns {Promise<number>} Key price in refined metal
  */
 Methods.prototype.getKeyPrice = async function (pricelistPath) {
   const defaultKeyPrice = 52.22;
+  const now = Date.now();
+
+  // Return cached price if still valid
+  if (keyPriceCache !== null && (now - keyPriceCacheTime) < KEY_PRICE_CACHE_DURATION) {
+    return keyPriceCache;
+  }
 
   // Try to load from pricelist first
   if (pricelistPath && fs.existsSync(pricelistPath)) {
@@ -402,6 +443,9 @@ Methods.prototype.getKeyPrice = async function (pricelistPath) {
       const keyPrice = keyItem?.sell?.metal;
 
       if (keyPrice && keyPrice > 0 && keyPrice < 1000) {
+        // Cache the price from pricelist
+        keyPriceCache = keyPrice;
+        keyPriceCacheTime = now;
         return keyPrice;
       }
     } catch (error) {
@@ -429,11 +473,20 @@ Methods.prototype.getKeyPrice = async function (pricelistPath) {
 
       if (keyPrice && keyPrice > 0 && keyPrice < 1000) {
         console.log(`Key price from PriceDB.io: ${keyPrice} ref`);
+        // Cache the price from PriceDB.io
+        keyPriceCache = keyPrice;
+        keyPriceCacheTime = now;
         return keyPrice;
       }
     }
   } catch (error) {
     console.warn('Failed to fetch key price from PriceDB.io:', error.message);
+  }
+
+  // If we have a stale cache, use it rather than defaulting
+  if (keyPriceCache !== null) {
+    console.log(`Using cached key price (expired): ${keyPriceCache} ref`);
+    return keyPriceCache;
   }
 
   // Final fallback to default
