@@ -198,6 +198,13 @@ module.exports = function (app) {
       html +=
         '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
       html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Min Listing Count:</label>
+        <input type="number" name="min_listing_count" value="${config.minListingCount || 3}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1" max="20" step="1">
+        <small style="color: #666;">Minimum buy/sell listings required to price an item (default: 3)</small>
+      </div>`;
+      html += `<div>
         <label style="display: block; margin-bottom: 5px; font-weight: bold;">Min Sell Margin:</label>
         <input type="number" name="min_sell_margin" value="${config.minSellMargin || 0.11}" 
                lang="en" inputmode="decimal"
@@ -361,10 +368,172 @@ module.exports = function (app) {
       html += '</div>';
       html += '</div>';
 
+      // Scheduler Intervals Section - NEW
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">⏰ Scheduler Intervals</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Control how often various data sources are updated</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">BPTF Prices Update (minutes):</label>
+        <input type="number" name="bptf_prices_update_minutes" value="${config.schedulerIntervals?.bptfPricesUpdateMinutes || 15}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1" max="1440" step="1">
+        <small style="color: #666;">How often to fetch Backpack.tf prices (default: 15)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">PriceDB Update (hours):</label>
+        <input type="number" name="pricedb_update_hours" value="${config.schedulerIntervals?.priceDbUpdateHours || 6}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1" max="168" step="1">
+        <small style="color: #666;">How often to fetch PriceDB.io data (default: 6)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Unusual Effects Update (hours):</label>
+        <input type="number" name="unusual_effects_update_hours" value="${config.schedulerIntervals?.unusualEffectsUpdateHours || 24}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1" max="720" step="1">
+        <small style="color: #666;">How often to update unusual effects list (default: 24)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Steam Schema Update (hours):</label>
+        <input type="number" name="steam_schema_update_hours" value="${config.schedulerIntervals?.steamSchemaUpdateHours || 24}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1" max="720" step="1">
+        <small style="color: #666;">How often to refresh Steam item schema (default: 24)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // PriceDB Configuration Section - NEW
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">💰 PriceDB.io Configuration</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Configure PriceDB.io API integration settings</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Base URL:</label>
+        <input type="text" name="pricedb_base_url" value="${config.priceDb?.baseUrl || 'https://pricedb.io'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">PriceDB.io API base URL</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Item History Endpoint:</label>
+        <input type="text" name="pricedb_item_history_endpoint" value="${config.priceDb?.itemHistoryEndpoint || '/api/item-history'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">Endpoint for price history</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Item ID:</label>
+        <input type="text" name="pricedb_default_item_id" value="${config.priceDb?.defaultItemId || '5021;6'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">Mann Co. Supply Crate Key item ID (default: 5021;6)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Request Timeout (ms):</label>
+        <input type="number" name="pricedb_request_timeout" value="${config.priceDb?.requestTimeoutMs || 10000}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="1000" max="60000" step="1000">
+        <small style="color: #666;">API request timeout in milliseconds (default: 10000)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Chart.js Configuration Section - NEW
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">📊 Chart.js Configuration</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Configure Chart.js library settings</p>';
+
+      html += '<div>';
+      html += `<label style="display: block; margin-bottom: 5px; font-weight: bold;">CDN URL:</label>
+        <input type="text" name="chartjs_cdn_url" value="${config.chartJs?.cdnUrl || 'https://cdn.jsdelivr.net/npm/chart.js'}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <small style="color: #666;">CDN URL for Chart.js library (change for offline deployments)</small>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Price Bounds Configuration Section - NEW
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">⚖️ Price Bounds Defaults</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Default price boundary settings for new items</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Min Keys:</label>
+        <input type="number" name="price_bounds_default_min_keys" value="${config.priceBounds?.defaultMinKeys || 1.0}" 
+               lang="en" inputmode="decimal"
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="0" step="0.1">
+        <small style="color: #666;">Default minimum price in keys (default: 1.0)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Max Keys:</label>
+        <input type="number" name="price_bounds_default_max_keys" value="${config.priceBounds?.defaultMaxKeys || 500.0}" 
+               lang="en" inputmode="decimal"
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="0" step="1">
+        <small style="color: #666;">Default maximum price in keys (default: 500.0)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Min Metal:</label>
+        <input type="number" name="price_bounds_default_min_metal" value="${config.priceBounds?.defaultMinMetal || 0.11}" 
+               lang="en" inputmode="decimal"
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="0" step="0.01">
+        <small style="color: #666;">Default minimum price in refined metal (default: 0.11)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Max Metal:</label>
+        <input type="number" name="price_bounds_default_max_metal" value="${config.priceBounds?.defaultMaxMetal || 200.0}" 
+               lang="en" inputmode="decimal"
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="0" step="1">
+        <small style="color: #666;">Default maximum price in refined metal (default: 200.0)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
+      // Pricelist Configuration Section - NEW
+      html += '<div style="margin-bottom: 30px;">';
+      html +=
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">📋 Pricelist Pagination</h3>';
+      html +=
+        '<p style="color: #666; margin-bottom: 15px;">Configure pricelist display preferences</p>';
+
+      html +=
+        '<div style="display: grid; grid-template-columns: 1fr; gap: 20px; margin: 20px 0;">';
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Default Items Per Page:</label>
+        <input type="number" name="pricelist_default_items_per_page" value="${config.pricelist?.defaultItemsPerPage || 50}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
+               min="10" max="500" step="10">
+        <small style="color: #666;">Number of items shown per page (default: 50)</small>
+      </div>`;
+      html += `<div>
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Items Per Page Options (comma-separated):</label>
+        <input type="text" name="pricelist_items_per_page_options" value="${(config.pricelist?.itemsPerPageOptions || [25, 50, 100, 200]).join(',')}" 
+               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+               placeholder="25,50,100,200">
+        <small style="color: #666;">Available pagination options (default: 25,50,100,200)</small>
+      </div>`;
+      html += '</div>';
+      html += '</div>';
+
       // Price Swing Limits Section
       html += '<div style="margin-bottom: 30px;">';
       html +=
-        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">� Price Swing Limits</h3>';
+        '<h3 style="color: #007cba; border-bottom: 2px solid #e9ecef; padding-bottom: 10px;">📊 Price Swing Limits</h3>';
       html +=
         '<p style="color: #666; margin-bottom: 15px;">Control maximum price changes per update to prevent sudden swings</p>';
 
@@ -517,6 +686,7 @@ module.exports = function (app) {
 
       // Update application settings
       config.pricerPort = parseInt(req.body.pricer_port) || 3456;
+      config.minListingCount = parseInt(req.body.min_listing_count) || 3;
       config.minSellMargin = parseFloatLocale(req.body.min_sell_margin) || 0.11;
 
       // Update SCM margins
@@ -599,6 +769,55 @@ module.exports = function (app) {
       config.websocketRelay.protocol = req.body.relay_protocol || 'ws';
       config.websocketRelay.host = req.body.relay_host || 'localhost';
       config.websocketRelay.port = parseInt(req.body.relay_port) || 7789;
+
+      // Update scheduler intervals
+      if (!config.schedulerIntervals) {
+        config.schedulerIntervals = {};
+      }
+      config.schedulerIntervals.bptfPricesUpdateMinutes = parseInt(req.body.bptf_prices_update_minutes) || 15;
+      config.schedulerIntervals.priceDbUpdateHours = parseInt(req.body.pricedb_update_hours) || 6;
+      config.schedulerIntervals.unusualEffectsUpdateHours = parseInt(req.body.unusual_effects_update_hours) || 24;
+      config.schedulerIntervals.steamSchemaUpdateHours = parseInt(req.body.steam_schema_update_hours) || 24;
+
+      // Update PriceDB configuration
+      if (!config.priceDb) {
+        config.priceDb = {};
+      }
+      config.priceDb.baseUrl = req.body.pricedb_base_url || 'https://pricedb.io';
+      config.priceDb.itemHistoryEndpoint = req.body.pricedb_item_history_endpoint || '/api/item-history';
+      config.priceDb.defaultItemId = req.body.pricedb_default_item_id || '5021;6';
+      config.priceDb.requestTimeoutMs = parseInt(req.body.pricedb_request_timeout) || 10000;
+
+      // Update Chart.js configuration
+      if (!config.chartJs) {
+        config.chartJs = {};
+      }
+      config.chartJs.cdnUrl = req.body.chartjs_cdn_url || 'https://cdn.jsdelivr.net/npm/chart.js';
+
+      // Update price bounds configuration
+      if (!config.priceBounds) {
+        config.priceBounds = {};
+      }
+      config.priceBounds.defaultMinKeys = parseFloatLocale(req.body.price_bounds_default_min_keys) || 1.0;
+      config.priceBounds.defaultMaxKeys = parseFloatLocale(req.body.price_bounds_default_max_keys) || 500.0;
+      config.priceBounds.defaultMinMetal = parseFloatLocale(req.body.price_bounds_default_min_metal) || 0.11;
+      config.priceBounds.defaultMaxMetal = parseFloatLocale(req.body.price_bounds_default_max_metal) || 200.0;
+
+      // Update pricelist configuration
+      if (!config.pricelist) {
+        config.pricelist = {};
+      }
+      config.pricelist.defaultItemsPerPage = parseInt(req.body.pricelist_default_items_per_page) || 50;
+      
+      // Parse items per page options
+      if (req.body.pricelist_items_per_page_options) {
+        config.pricelist.itemsPerPageOptions = req.body.pricelist_items_per_page_options
+          .split(',')
+          .map(v => parseInt(v.trim()))
+          .filter(v => !isNaN(v) && v > 0);
+      } else {
+        config.pricelist.itemsPerPageOptions = [25, 50, 100, 200];
+      }
 
       // Update pricer config settings
       pricerConfig.port = parseInt(req.body.web_port) || 3000;

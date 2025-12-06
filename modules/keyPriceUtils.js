@@ -1,224 +1,56 @@
-async function insertKeyPrice(db, keyobj, buyPrice, sellPrice, timestamp) {
-  const lowerBound = keyobj.metal * 0.7; // 30% lower than the key's metal value
-  const upperBound = keyobj.metal * 1.3; // 30% higher than the key's metal value
+const { getBaseConfigManager } = require('./baseConfigManager');
 
-  if (
-    buyPrice < lowerBound ||
-    buyPrice > upperBound ||
-    sellPrice < lowerBound ||
-    sellPrice > upperBound
-  ) {
-    console.warn(`Abnormal key price rejected. Buy: ${buyPrice}, Sell: ${sellPrice}`);
-    return;
-  }
+/**
+ * Fetches the Mann Co. Supply Crate Key price from pricedb.io
+ * @returns {Promise<Object>} Key price object with buy/sell prices
+ */
+async function fetchKeyPriceFromPriceDB() {
+  const config = getBaseConfigManager().getConfig();
+  const apiSettings = config.apiSettings || {
+    priceDbBaseUrl: 'https://pricedb.io/api',
+    keyPriceTimeout: 10000,
+  };
 
   try {
-    await db.none(
-      `INSERT INTO key_prices (sku, buy_price_metal, sell_price_metal, timestamp) 
-            VALUES ($1, $2, $3, $4)`,
-      ['5021;6', buyPrice, sellPrice, timestamp]
-    );
-  } catch {
-    console.error('Error inserting key price');
-  }
-}
+    const response = await fetch(`${apiSettings.priceDbBaseUrl}/item/5021;6`, {
+      signal: AbortSignal.timeout(apiSettings.keyPriceTimeout),
+    });
 
-async function cleanupOldKeyPrices(db) {
-  try {
-    await db.none("DELETE FROM key_prices WHERE created_at < NOW() - INTERVAL '30 days'");
-    console.log('Cleaned up key prices older than 30 days.');
-  } catch {
-    console.error('Error cleaning up old key prices');
-  }
-}
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
 
-function sendPriceAlert(message) {
-  console.log(`ALERT: ${message}`);
-  // Integrate with notification system if needed
-}
+    const data = await response.json();
 
-async function adjustPrice({
-  name,
-  sku,
-  newBuyPrice,
-  newSellPrice,
-  Methods,
-  PRICELIST_PATH,
-  socketIO,
-}) {
-  try {
-    const timestamp = Math.floor(Date.now() / 1000);
+    // Validate the response has the expected structure
+    if (!data.buy || !data.sell || typeof data.buy.metal !== 'number' || typeof data.sell.metal !== 'number') {
+      throw new Error('Invalid response structure from pricedb.io');
+    }
 
-    const updatedItem = {
-      name: name,
-      sku: sku,
-      source: 'bptf',
+    const keyItem = {
+      name: 'Mann Co. Supply Crate Key',
+      sku: '5021;6',
+      source: 'BPTF',
+      time: data.time || Math.floor(Date.now() / 1000),
       buy: {
         keys: 0,
-        metal: newBuyPrice,
+        metal: data.buy.metal,
       },
       sell: {
         keys: 0,
-        metal: newSellPrice,
+        metal: data.sell.metal,
       },
-      time: timestamp,
     };
 
-    Methods.addToPricelist(updatedItem, PRICELIST_PATH);
-    socketIO.emit('price', updatedItem);
-
-    console.log(`Price for ${name} updated. Buy: ${newBuyPrice}, Sell: ${newSellPrice}`);
-  } catch {
-    console.error('Error adjusting price');
-  }
-}
-
-async function checkKeyPriceStability({ db, Methods, adjustPrice, sendPriceAlert, socketIO }) {
-  const CHANGE_THRESHOLD = 0.33;
-  const STD_THRESHOLD = 0.66; // You can move this to config if you want
-  try {
-    const resultA = await db.any(`
-            SELECT
-                AVG(buy_price_metal)::float AS avg_buy,
-                AVG(sell_price_metal)::float AS avg_sell,
-                STDDEV_POP(buy_price_metal)::float AS std_buy,
-                STDDEV_POP(sell_price_metal)::float AS std_sell
-            FROM key_prices
-            WHERE sku = '5021;6'
-              AND created_at BETWEEN NOW() - INTERVAL '3 hours' AND NOW();
-        `);
-    const resultB = await db.any(`
-            SELECT
-                AVG(buy_price_metal)::float AS avg_buy,
-                AVG(sell_price_metal)::float AS avg_sell
-            FROM key_prices
-            WHERE sku = '5021;6'
-              AND created_at BETWEEN NOW() - INTERVAL '6 hours' AND NOW() - INTERVAL '3 hours';
-        `);
-
-    if (!resultA.length || !resultB.length) {
-      console.log('Not enough data in one of the 3-hour windows—skipping volatility check.');
-      return;
-    }
-
-    const { avg_buy: buyA, avg_sell: sellA, std_buy: stdBuyA, std_sell: stdSellA } = resultA[0];
-    const { avg_buy: buyB, avg_sell: sellB } = resultB[0];
-
-    // eslint-disable-next-line eqeqeq
-    if (buyA == null || sellA == null || buyB == null || sellB == null) {
-      console.log('Not enough data in one of the 3-hour windows—skipping volatility check.');
-      return;
-    }
-
-    // Additional stddev check
-    if (stdSellA > STD_THRESHOLD || stdBuyA > STD_THRESHOLD) {
-      sendPriceAlert(
-        `High key price volatility detected (std sell: ${stdSellA}, std buy: ${stdBuyA})`
-      );
-      return;
-    }
-
-    const sellDelta = sellA - sellB;
-    const buyDelta = buyA - buyB;
-
-    let rawSell = sellA;
-    let rawBuy = buyA;
-    const MIN_STEP = 0.33;
-
-    if (Math.abs(sellDelta) > CHANGE_THRESHOLD) {
-      rawSell += sellDelta > 0 ? +0.11 : -0.11;
-      let roundedSell = Methods.getRight(rawSell);
-      let roundedBuy = Methods.getRight(rawBuy);
-
-      if (roundedSell - roundedBuy < MIN_STEP) {
-        rawBuy = rawSell - MIN_STEP;
-        roundedBuy = Methods.getRight(rawBuy);
-      }
-
-      await adjustPrice({
-        name: 'Mann Co. Supply Crate Key',
-        sku: '5021;6',
-        newBuyPrice: roundedBuy,
-        newSellPrice: roundedSell,
-        Methods,
-        PRICELIST_PATH: './files/pricelist.json',
-        socketIO,
-      });
-      return sendPriceAlert(
-        `3h sell avg moved by ${sellDelta.toFixed(2)} → adjusting to ${roundedSell}`
-      );
-    }
-
-    if (Math.abs(buyDelta) > CHANGE_THRESHOLD) {
-      rawBuy += buyDelta > 0 ? -0.11 : +0.11;
-      let roundedSell = Methods.getRight(rawSell);
-      let roundedBuy = Methods.getRight(rawBuy);
-
-      if (roundedSell - roundedBuy < MIN_STEP) {
-        rawBuy = rawSell - MIN_STEP;
-        roundedBuy = Methods.getRight(rawBuy);
-      }
-
-      await adjustPrice({
-        name: 'Mann Co. Supply Crate Key',
-        sku: '5021;6',
-        newBuyPrice: roundedBuy,
-        newSellPrice: roundedSell,
-        Methods,
-        PRICELIST_PATH: './files/pricelist.json',
-        socketIO,
-      });
-      return sendPriceAlert(
-        `3h buy avg moved by ${buyDelta.toFixed(2)} → adjusting to ${roundedBuy}`
-      );
-    }
-
-    const tempRoundedSell = Methods.getRight(rawSell);
-    const tempRoundedBuy = Methods.getRight(rawBuy);
-
-    if (tempRoundedSell - tempRoundedBuy <= MIN_STEP) {
-      rawBuy = rawSell - MIN_STEP;
-      const roundedBuy = Methods.getRight(rawBuy);
-      const roundedSell = Methods.getRight(rawSell);
-      await adjustPrice({
-        name: 'Mann Co. Supply Crate Key',
-        sku: '5021;6',
-        newBuyPrice: roundedBuy,
-        newSellPrice: roundedSell,
-        Methods,
-        PRICELIST_PATH: './files/pricelist.json',
-        socketIO,
-      });
-      return sendPriceAlert(
-        `Spread too tight (${(roundedSell - Methods.getRight(rawBuy + MIN_STEP)).toFixed(2)}); ` +
-          `forcing buy to ${roundedBuy} so buy + ${MIN_STEP.toFixed(2)} ≤ sell (${roundedSell}).`
-      );
-    }
-
-    const roundedSell = Methods.getRight(rawSell);
-    const roundedBuy = Methods.getRight(rawBuy);
-
-    await adjustPrice({
-      name: 'Mann Co. Supply Crate Key',
-      sku: '5021;6',
-      newBuyPrice: roundedBuy,
-      newSellPrice: roundedSell,
-      Methods,
-      PRICELIST_PATH: './files/pricelist.json',
-      socketIO,
-    });
-    console.log(
-      `Stable over last 6h (windows avg buy=${roundedBuy}, sell=${roundedSell}). Change delta for buy=${buyDelta} and change delta for sell=${sellDelta}`
-    );
-  } catch (err) {
-    console.error('Error checking key price stability:', err);
+    console.log(`Key price fetched from pricedb.io - Buy: ${data.buy.metal}, Sell: ${data.sell.metal}`);
+    return keyItem;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error fetching key price from pricedb.io:', errorMessage);
+    throw error;
   }
 }
 
 module.exports = {
-  insertKeyPrice,
-  cleanupOldKeyPrices,
-  sendPriceAlert,
-  adjustPrice,
-  checkKeyPriceStability,
+  fetchKeyPriceFromPriceDB,
 };

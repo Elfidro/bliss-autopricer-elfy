@@ -454,10 +454,17 @@ Methods.prototype.getKeyPrice = async function (pricelistPath) {
   }
 
   // Fall back to PriceDB.io
+  const { getBaseConfigManager } = require('./modules/baseConfigManager');
+  const config = getBaseConfigManager().getConfig();
+  const apiSettings = config.apiSettings || { 
+    priceDbBaseUrl: 'https://pricedb.io/api',
+    priceDbTimeout: 5000
+  };
+
   try {
     console.log('Fetching key price from PriceDB.io...');
-    const response = await fetch('https://pricedb.io/api/item/5021;6', {
-      signal: AbortSignal.timeout(5000),
+    const response = await fetch(`${apiSettings.priceDbBaseUrl}/item/5021;6`, {
+      signal: AbortSignal.timeout(apiSettings.priceDbTimeout),
     });
 
     if (response.ok) {

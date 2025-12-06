@@ -12,9 +12,17 @@
       "pricelistPath": "C:\\repos\\tf2autobot\\files\\blisstrading\\pricelist.json",
       "enabled": true,
       "source": "discovery"
+    },
+    {
+      "id": "manual_1762428378722",
+      "name": "Test Bot 2",
+      "polldataPath": "C:\\Users\\operring\\OneDrive - Aegis Computer Maintenance Ltd\\Documents\\repos\\autobot\\tf2autobot-pricedb-runlocal-test\\files\\blisstrading\\polldata.json",
+      "pricelistPath": "C:\\Users\\operring\\OneDrive - Aegis Computer Maintenance Ltd\\Documents\\repos\\autobot\\tf2autobot-pricedb-runlocal-test\\files\\blisstrading\\pricelist.json",
+      "enabled": true,
+      "source": "manual"
     }
   ],
-  "selectedBot": "tf2autobot_blisstrading",
+  "selectedBot": "manual_1762428378722",
   "migration": {
     "migratedFrom": "v1.0",
     "migratedAt": "2025-08-03T02:13:46.773Z",

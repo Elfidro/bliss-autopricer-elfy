@@ -86,6 +86,7 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 ```json
 {
   "minSellMargin": 0.11,
+  "minListingCount": 3,
   "usePriceDbFallback": true,
   "alwaysQuerySnapshotAPI": true,
   "maxPercentageDifferences": {
@@ -104,6 +105,7 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 | Option                  | Type    | Default | Description                                                       |
 | ----------------------- | ------- | ------- | ----------------------------------------------------------------- |
 | `minSellMargin`         | number  | `0.11`  | Minimum profit margin for selling (0.11 = 11% or 1 scrap)        |
+| `minListingCount`       | number  | `3`     | Minimum buy/sell listings required to price an item (range: 1-20) |
 | `usePriceDbFallback`    | boolean | `true`  | Use pricedb.io as primary fallback, then SCM if item not found   |
 | `alwaysQuerySnapshotAPI`| boolean | `true`  | Always query the snapshot API for price data                      |
 | `maxPercentageDifferences.buy` | number | `5` | Maximum percentage difference for buy prices vs baseline    |

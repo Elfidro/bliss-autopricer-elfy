@@ -280,6 +280,7 @@ module.exports = function renderPage(title, bodyContent) {
           <a href="/logs">📝 Logs</a>
           <a href="/settings">⚙️ Settings</a>
           <a href="/bot-config">🤖 Bot Config</a>
+          <a href="https://discord.gg/7H2bceTgQK" target="_blank" rel="noopener noreferrer">💬 Get Support</a>
         </div>
       </div>
     </nav>

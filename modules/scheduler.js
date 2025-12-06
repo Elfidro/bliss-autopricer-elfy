@@ -1,17 +1,25 @@
+const { getBaseConfigManager } = require('./baseConfigManager');
+
 function scheduleTasks({
   updateExternalPricelist,
   calculateAndEmitPrices,
-  cleanupOldKeyPrices,
-  checkKeyPriceStability,
+  updateKeyObject,
   updateMovingAverages,
   db,
   pgp,
 }) {
-  setInterval(updateExternalPricelist, 30 * 60 * 1000);
-  setInterval(calculateAndEmitPrices, 15 * 60 * 1000);
-  setInterval(() => cleanupOldKeyPrices(db), 30 * 60 * 1000);
-  setInterval(checkKeyPriceStability, 30 * 60 * 1000);
-  setInterval(() => updateMovingAverages(db, pgp), 15 * 60 * 1000);
+  const config = getBaseConfigManager().getConfig();
+  const intervals = config.schedulerIntervals || {
+    updatePricelist: 1800000,
+    calculatePrices: 900000,
+    updateKeyPrice: 900000,
+    updateMovingAverages: 900000,
+  };
+
+  setInterval(updateExternalPricelist, intervals.updatePricelist);
+  setInterval(calculateAndEmitPrices, intervals.calculatePrices);
+  setInterval(updateKeyObject, intervals.updateKeyPrice);
+  setInterval(() => updateMovingAverages(db, pgp), intervals.updateMovingAverages);
 }
 
 module.exports = scheduleTasks;
