@@ -34,6 +34,13 @@ const DEFAULTS = {
     port: 7789,
     protocol: 'ws',
   },
+  // Price an item from its buy listings alone when no sell listings exist yet,
+  // using buy + sellMarginRef as a placeholder sell price. Favours getting
+  // items in stock over waiting for both sides of the market to fill in.
+  priceWithoutSellListings: {
+    enabled: true,
+    sellMarginRef: 5,
+  },
 };
 
 function deepMerge(target, src) {

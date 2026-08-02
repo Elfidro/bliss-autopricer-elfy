@@ -139,5 +139,9 @@
     "username": "admin",
     "passwordHash": "",
     "sessionHours": 12
+  },
+  "priceWithoutSellListings": {
+    "enabled": true,
+    "sellMarginRef": 5
   }
 }

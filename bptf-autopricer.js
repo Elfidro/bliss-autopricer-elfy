@@ -151,12 +151,23 @@ const itemListManager = createItemListManager(ITEM_LIST_PATH, config);
 const { watchItemList, getAllowedItemNames, getItemBounds, allowAllItems } = itemListManager;
 watchItemList();
 
+// When priceWithoutSellListings is on, an item only needs buy-side depth to be
+// worth pricing — the sell price is derived from the buy price until real sell
+// listings show up. Otherwise both sides must have depth.
+function requiresSellListings() {
+  return config.priceWithoutSellListings?.enabled !== true;
+}
+
 async function getPricableItems(db) {
   const minListings = config.minListingCount || 3;
-  const rows = await db.any(`
+  const sellClause = requiresSellListings() ? 'AND current_sell_count > $1' : '';
+  const rows = await db.any(
+    `
     SELECT sku FROM listing_stats
-    WHERE current_buy_count > $1 AND current_sell_count > $1
-  `, [minListings]);
+    WHERE current_buy_count > $1 ${sellClause}
+  `,
+    [minListings]
+  );
   return rows.map((r) => r.sku);
 }
 
@@ -240,11 +251,15 @@ const KILLSTREAK_TIERS = {
 async function getKsItemNamesToPrice(db, allItemNames) {
   console.log(`Getting killstreak items with enough listings...`);
   const minListings = config.minListingCount || 3;
-  const rows = await db.any(`
+  const sellClause = requiresSellListings() ? 'AND current_sell_count > $1' : '';
+  const rows = await db.any(
+    `
     SELECT sku FROM listing_stats
     WHERE (sku LIKE '%;kt-1' OR sku LIKE '%;kt-2' OR sku LIKE '%;kt-3')
-      AND current_buy_count > $1 AND current_sell_count > $1
-  `, [minListings]);
+      AND current_buy_count > $1 ${sellClause}
+  `,
+    [minListings]
+  );
   console.log(`Found ${rows.length} killstreak items with enough listings.`);
 
   // Build a map from baseSku (defindex + qualities except kt/effect) to name
@@ -674,12 +689,14 @@ const determinePrice = async (name, sku) => {
     );
   }
 
+  const sellRequired = requiresSellListings();
+
   try {
     // Check for undefined. No listings.
-    if (!buyListings || !sellListings) {
+    if (!buyListings || (sellRequired && !sellListings)) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough listings...`);
     }
-    if (buyListings.rowCount === 0 || sellListings.rowCount === 0) {
+    if (buyListings.rowCount === 0 || (sellRequired && sellListings.rowCount === 0)) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough listings...`);
     }
   } catch (e) {
@@ -753,8 +770,12 @@ const determinePrice = async (name, sku) => {
     return valueB - valueA;
   });
 
+  // May be empty when priceWithoutSellListings is on — the sell price is then
+  // derived from the buy price in getAverages.
+  const sellRows = sellListings?.rows || [];
+
   // Sort sellListings into ascending order of price.
-  var sellFiltered = sellListings.rows.sort((a, b) => {
+  var sellFiltered = sellRows.sort((a, b) => {
     let valueA = Methods.toMetal(a.currencies, keyobj.metal);
     let valueB = Methods.toMetal(b.currencies, keyobj.metal);
 
@@ -779,7 +800,7 @@ const determinePrice = async (name, sku) => {
     }
   });
 
-  sellFiltered = sellListings.rows.sort((a, b) => {
+  sellFiltered = sellRows.sort((a, b) => {
     // Custom sorting logic to prioritize specific Steam IDs
     const aIsPrioritized = prioritySteamIds.includes(a.steamid);
     const bIsPrioritized = prioritySteamIds.includes(b.steamid);
@@ -977,6 +998,29 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
           `DEBUG: Key sell price from picked listing - keys: ${final_sellObj.keys}, metal: ${final_sellObj.metal}`
         );
       }
+    } else if (config.priceWithoutSellListings?.enabled === true) {
+      // No sell listings yet. Rather than leave the item unpriced, derive a
+      // placeholder sell price from the buy price so the bot can start
+      // stocking it. Replaced by a real average as soon as sell listings
+      // arrive. The maxPercentageDifferences.sell guard below still applies,
+      // so a placeholder that undercuts the bptf baseline is rejected.
+      const marginRef = Number(config.priceWithoutSellListings.sellMarginRef) || 5;
+      const buyInMetal = Methods.toMetal(final_buyObj, keyobj.metal);
+      const sellInMetal = Methods.getRight(buyInMetal + marginRef);
+
+      if (sku === '5021;6') {
+        final_sellObj.keys = 0;
+        final_sellObj.metal = sellInMetal;
+      } else {
+        const keys = Math.trunc(sellInMetal / keyobj.metal);
+        final_sellObj.keys = keys;
+        final_sellObj.metal = Methods.getRight(sellInMetal - keys * keyobj.metal);
+      }
+
+      console.log(
+        `| UPDATING PRICES |: ${name} has no sell listings — using buy + ${marginRef} ref ` +
+          `placeholder (${final_sellObj.keys} keys + ${final_sellObj.metal} ref).`
+      );
     } else {
       throw new Error(`| UPDATING PRICES |: ${name} not enough sell listings...`);
     }
