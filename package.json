@@ -28,7 +28,8 @@
     "setup-bots": "node setup-bots.js",
     "start": "node bptf-autopricer.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "validate-config": "node validate-config.js"
+    "validate-config": "node validate-config.js",
+    "set-password": "node set-password.js"
   },
   "dependencies": {
     "@tf2autobot/tf2-schema": "^4.3.0",

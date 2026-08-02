@@ -133,5 +133,11 @@
   },
   "emitQueueInterval": 20,
   "testValue": "Hello World",
-  "fallbackOntoPricesTf": false
+  "fallbackOntoPricesTf": false,
+  "webAuth": {
+    "enabled": true,
+    "username": "admin",
+    "passwordHash": "",
+    "sessionHours": 12
+  }
 }

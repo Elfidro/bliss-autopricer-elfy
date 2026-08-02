@@ -3,6 +3,8 @@ const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
 const ConfigManager = require('./configManager');
+const { getBaseConfigManager } = require('./baseConfigManager');
+const { createAuthMiddleware } = require('./auth');
 
 const app = express();
 // Increase body parser limits for large pricelists and parameter arrays
@@ -39,6 +41,16 @@ try {
 const PORT = config.port;
 
 function mountRoutes() {
+  // Must come before every route: /settings renders API keys and the database
+  // password into the page, so nothing here may be served unauthenticated.
+  let webAuth = {};
+  try {
+    webAuth = getBaseConfigManager().getConfig().webAuth || {};
+  } catch (err) {
+    console.error(`❌ Could not read webAuth from config.json: ${err.message}`);
+  }
+  app.use(createAuthMiddleware(webAuth));
+
   require('./routes/pricelist')(app, config, configManager);
   require('./routes/trades')(app, config, configManager);
   require('./routes/key-prices')(app, config);

@@ -128,5 +128,15 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Local instance config — copy config.example.json to config.json and edit.
+# Never tracked, so pulling upstream changes can't overwrite your keys.
 config.json
-config.json
+pricerConfig.json
+pricerConfig.json.*.backup
+
+# Runtime state, recreated by the app on startup
+files/item_list.json
+files/pricelist.json
+bptf-prices.json
+cached-pricelist.json

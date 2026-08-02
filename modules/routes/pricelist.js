@@ -340,7 +340,7 @@ module.exports = function (app, config, configManager) {
       html += '<div style="padding: 15px;">';
       html += '<ul id="queue-list" style="list-style: none; padding: 0; margin: 0;"></ul>';
       html +=
-        '<button onclick="applyQueue()" style="width: 100%; background: #007cba; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px;">Apply All & Restart Bot</button>';
+        '<button id="apply-queue-btn" onclick="applyQueue()" style="width: 100%; background: #007cba; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px;">Apply All</button>';
       html += '</div>';
       html += '</div>';
 
@@ -403,7 +403,7 @@ module.exports = function (app, config, configManager) {
       html +=
         '<li><strong>Edit Quantities:</strong> Adjust min/max values and click ✏️ to queue changes</li>';
       html +=
-        '<li><strong>Apply Changes:</strong> Use the "Apply All & Restart Bot" button to execute queued actions</li>';
+        '<li><strong>Apply Changes:</strong> Use the "Apply All" button to execute queued actions. It only restarts the bot when the queue contains bot pricelist changes — adding items to the tracker does not restart anything.</li>';
       html +=
         '<li><strong>Age Monitoring:</strong> Items are color-coded by age - red items need attention</li>';
       html += '</ul>';
@@ -472,7 +472,9 @@ module.exports = function (app, config, configManager) {
           function refreshQueue() {
             const ul = document.getElementById('queue-list');
             ul.innerHTML = '';
-            
+
+            updateApplyButton();
+
             if (queue.length === 0) {
               const li = document.createElement('li');
               li.style.cssText = 'color: #666; font-style: italic; padding: 10px 0; text-align: center;';
@@ -516,6 +518,19 @@ module.exports = function (app, config, configManager) {
             });
           }
 
+          // Only bot pricelist changes (/bot/add, /bot/remove, /bot/edit) restart
+          // tf2autobot. Tracker additions go to /add-item, which just writes
+          // files/item_list.json — the autopricer hot-reloads that via chokidar.
+          function queueNeedsRestart() {
+            return queue.some(function (q) { return q.action !== 'addName'; });
+          }
+
+          function updateApplyButton() {
+            const button = document.getElementById('apply-queue-btn');
+            if (!button) { return; }
+            button.textContent = queueNeedsRestart() ? 'Apply All & Restart Bot' : 'Apply All';
+          }
+
           function queueAction(action, value) {
             let sku, name, min, max;
             
@@ -546,11 +561,15 @@ module.exports = function (app, config, configManager) {
               return;
             }
             
-            if (!confirm(\`Apply \${queue.length} change(s) and restart bot?\\n\\nThis will:\\n- Execute all queued actions\\n- Restart your trading bot\\n- Update the pricelist\`)) {
+            const summary = queueNeedsRestart()
+              ? \`Apply \${queue.length} change(s) and restart bot?\\n\\nThis will:\\n- Execute all queued actions\\n- Restart your trading bot\\n- Update the pricelist\`
+              : \`Apply \${queue.length} change(s)?\\n\\nThis will:\\n- Add the item(s) to the tracker watchlist\\n- NOT restart your trading bot\`;
+
+            if (!confirm(summary)) {
               return;
             }
-            
-            const button = document.querySelector('#queue-panel button');
+
+            const button = document.getElementById('apply-queue-btn');
             button.disabled = true;
             button.textContent = 'Processing...';
             
@@ -589,7 +608,7 @@ module.exports = function (app, config, configManager) {
             } catch (error) {
               alert('Error applying actions: ' + error.message);
               button.disabled = false;
-              button.textContent = 'Apply All & Restart Bot';
+              updateApplyButton();
             }
           }
           
