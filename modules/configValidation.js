@@ -41,6 +41,17 @@ const DEFAULTS = {
     enabled: true,
     sellMarginRef: 5,
   },
+  // Percentage tolerances are meaningless on cheap items: metal moves in scrap
+  // (0.11 ref), so below roughly 2.2 ref a single scrap already exceeds a 5%
+  // limit and nothing can ever price. Items whose baseline buy price is under
+  // thresholdRef are judged against these looser limits instead.
+  lowValuePricing: {
+    thresholdRef: 5,
+    maxPercentageDifferences: {
+      buy: 25,
+      sell: -25,
+    },
+  },
 };
 
 function deepMerge(target, src) {

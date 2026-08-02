@@ -143,5 +143,12 @@
   "priceWithoutSellListings": {
     "enabled": true,
     "sellMarginRef": 5
+  },
+  "lowValuePricing": {
+    "thresholdRef": 5,
+    "maxPercentageDifferences": {
+      "buy": 25,
+      "sell": -25
+    }
   }
 }

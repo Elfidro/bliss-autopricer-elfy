@@ -1157,12 +1157,24 @@ const finalisePrice = async (arr, name, sku) => {
       arr[1].keys = clamp(arr[1].keys, bounds.minSellKeys, bounds.maxSellKeys);
       arr[1].metal = clamp(arr[1].metal, bounds.minSellMetal, bounds.maxSellMetal);
 
-      // Enforce minSellMargin from config
+      // A sell price at or below the buy price is never usable. Fall back to
+      // the same buy + margin rule used when there are no sell listings, rather
+      // than the single scrap minSellMargin allows.
       const minSellMargin = config.minSellMargin ?? 0.11;
+      const fallbackMargin = Math.max(
+        Number(config.priceWithoutSellListings?.sellMarginRef) || 5,
+        minSellMargin
+      );
       var buyInMetal = Methods.toMetal(arr[0], keyobj.metal);
       var sellInMetal = Methods.toMetal(arr[1], keyobj.metal);
 
       if (buyInMetal >= sellInMetal) {
+        const targetSell = Methods.getRight(buyInMetal + fallbackMargin);
+        console.log(
+          `| UPDATING PRICES |: ${name} sell (${sellInMetal} ref) was not above buy ` +
+            `(${buyInMetal} ref) — using buy + ${fallbackMargin} ref instead.`
+        );
+
         // For keys, always use pure metal format
         if (sku === '5021;6') {
           item.buy = {
@@ -1171,16 +1183,19 @@ const finalisePrice = async (arr, name, sku) => {
           };
           item.sell = {
             keys: 0,
-            metal: Methods.getRight(arr[0].metal + minSellMargin),
+            metal: targetSell,
           };
         } else {
+          // buy + margin can cross a key, so normalise instead of bolting the
+          // margin onto the metal component and leaving keys untouched.
+          const sellKeys = Math.trunc(targetSell / keyobj.metal);
           item.buy = {
             keys: arr[0].keys,
             metal: Methods.getRight(arr[0].metal),
           };
           item.sell = {
-            keys: arr[0].keys,
-            metal: Methods.getRight(arr[0].metal + minSellMargin),
+            keys: sellKeys,
+            metal: Methods.getRight(targetSell - sellKeys * keyobj.metal),
           };
         }
       } else {

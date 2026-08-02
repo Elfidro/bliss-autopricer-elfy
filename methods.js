@@ -253,7 +253,10 @@ Methods.prototype.calculatePricingAPIDifferences = function (
   }
   // Calls another method that uses this percentage difference object to make decision on whether to use our autopricers price or not.
   try {
-    var usePrice = this.validatePrice(percentageDifferences);
+    var usePrice = this.validatePrice(
+      percentageDifferences,
+      this.getPriceLimits(results.priceTFBuyPrice)
+    );
     // We should use this price, resolves as true.
     return usePrice;
   } catch (e) {
@@ -262,7 +265,27 @@ Methods.prototype.calculatePricingAPIDifferences = function (
   }
 };
 
-Methods.prototype.validatePrice = function (percentageDifferences) {
+/**
+ * Pick the percentage limits to judge a price against.
+ *
+ * A percentage tolerance is meaningless on cheap items: metal only moves in
+ * scrap (0.11 ref), so at a 1.69 ref baseline the smallest possible increment
+ * is already 6.5% and the default 5% limit can never be satisfied. Anything
+ * under roughly 2.2 ref is unpriceable under the standard limits. Items below
+ * lowValuePricing.thresholdRef therefore use their own, looser pair.
+ */
+Methods.prototype.getPriceLimits = function (baselineBuyInMetal) {
+  const config = getConfig();
+  const low = config.lowValuePricing;
+  const threshold = Number(low?.thresholdRef);
+
+  if (low && threshold > 0 && Number(baselineBuyInMetal) < threshold && low.maxPercentageDifferences) {
+    return low.maxPercentageDifferences;
+  }
+  return config.maxPercentageDifferences;
+};
+
+Methods.prototype.validatePrice = function (percentageDifferences, limits) {
   // If the percentage difference in how much our pricer has determined we should buy an item
   // for compared to prices.tf is greater than the limit set in the config, we reject the price.
 
@@ -272,10 +295,11 @@ Methods.prototype.validatePrice = function (percentageDifferences) {
   // A greater percentage difference for buying, means that our pricer is buying for more than prices.tf.
   // A lesser percentage difference for selling, means that our pricer is selling for less than prices.tf.
   const config = getConfig();
-  if (percentageDifferences.buyDifference > config.maxPercentageDifferences.buy) {
-    throw new Error('Autopricer is buying for too much.');
-  } else if (percentageDifferences.sellDifference < config.maxPercentageDifferences.sell) {
-    throw new Error('Autopricer is selling for too cheap.');
+  const lim = limits || config.maxPercentageDifferences;
+  if (percentageDifferences.buyDifference > lim.buy) {
+    throw new Error(`Autopricer is buying for too much. (limit ${lim.buy}%)`);
+  } else if (percentageDifferences.sellDifference < lim.sell) {
+    throw new Error(`Autopricer is selling for too cheap. (limit ${lim.sell}%)`);
   }
   return true;
 };
