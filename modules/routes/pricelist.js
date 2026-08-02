@@ -3,6 +3,8 @@ const express = require('express');
 const { loadJson } = require('../utils');
 const renderPage = require('../layout');
 const { getBaseConfigManager } = require('../baseConfigManager');
+const { getSchemaManager } = require('../schemaInstance');
+const { db } = require('../dbInstance');
 
 module.exports = function (app, config, configManager) {
   const router = express.Router();
@@ -165,7 +167,64 @@ module.exports = function (app, config, configManager) {
     return tbl;
   }
 
-  function buildWatchlistTable(rows) {
+  // listing_stats is keyed by sku; watchlist entries are names. Priced items
+  // already carry a sku, so only unpriced ones need a schema lookup.
+  function resolveSku(row) {
+    if (row.sku) {
+      return row.sku;
+    }
+    const schema = getSchemaManager()?.schema;
+    if (!schema) {
+      return null;
+    }
+    try {
+      const sku = schema.getSkuFromName(row.name);
+      return !sku || /^(null|undefined|-1)\b/.test(String(sku)) ? null : sku;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadListingStats() {
+    try {
+      const rows = await db.any(
+        'SELECT sku, current_buy_count, current_sell_count FROM listing_stats'
+      );
+      return new Map(rows.map((r) => [r.sku, r]));
+    } catch (err) {
+      // Distinguish "query failed" from "no rows" so the column can say so.
+      console.error('Could not load listing stats:', err.message);
+      return null;
+    }
+  }
+
+  // Mirrors the gate in getPricableItems: current_buy_count > minListingCount,
+  // so the count actually needed is one more than the configured value.
+  function listingCell(row, stats) {
+    const sku = resolveSku(row);
+    if (!sku) {
+      return '<span class="wl-badge danger" title="This name does not resolve to a TF2 item, so the websocket will never match a listing for it">⚠ Name unmatched</span>';
+    }
+    if (!stats) {
+      return '<span class="wl-none">unavailable</span>';
+    }
+
+    const minListings = Number(baseConfig.minListingCount) || 3;
+    const need = minListings + 1;
+    const s = stats.get(sku);
+    const buy = s ? Number(s.current_buy_count) || 0 : 0;
+    const sell = s ? Number(s.current_sell_count) || 0 : 0;
+
+    if (buy === 0 && sell === 0) {
+      return '<span class="wl-badge muted" title="Tracked, but no listings have come through the feed yet">○ Waiting</span>';
+    }
+    if (buy > minListings) {
+      return `<span class="wl-badge ok" title="Enough buy listings to price">● ${buy} buy / ${sell} sell</span>`;
+    }
+    return `<span class="wl-badge warn" title="Collecting — needs ${need} buy listings to price">◐ ${buy} buy / ${sell} sell (need ${need})</span>`;
+  }
+
+  function buildWatchlistTable(rows, stats) {
     if (rows.length === 0) {
       return `
         <div class="empty-note">
@@ -184,7 +243,7 @@ module.exports = function (app, config, configManager) {
     let tbl = '<table class="wl-table">';
     tbl += '<thead><tr>';
     tbl += '<th class="wl-name">Item Name</th>';
-    tbl += '<th>Status</th><th>Buy Price</th><th>Sell Price</th>';
+    tbl += '<th>Status</th><th>Listings</th><th>Buy Price</th><th>Sell Price</th>';
     tbl += '<th>Age</th><th>In Bot</th>';
     tbl += '</tr></thead><tbody>';
 
@@ -200,6 +259,7 @@ module.exports = function (app, config, configManager) {
       tbl += `<tr class="wl-row wl-${row.status}" data-name="${row.name.toLowerCase()}">`;
       tbl += `<td class="wl-name">${nameHtml}</td>`;
       tbl += `<td><span class="wl-badge ${st.cls}">${st.label}</span></td>`;
+      tbl += `<td>${listingCell(row, stats)}</td>`;
       tbl += priced
         ? `<td class="wl-buy">${row.buy.keys} ${buyUnit} + ${row.buy.metal} Ref</td>`
         : '<td class="wl-none">—</td>';
@@ -293,7 +353,7 @@ module.exports = function (app, config, configManager) {
     return { outdated, current, missing, sell, watchlist };
   }
 
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     try {
       // Check if bot is configured
       const selectedBot = configManager.getSelectedBot();
@@ -430,7 +490,7 @@ module.exports = function (app, config, configManager) {
         '<p style="margin: 5px 0 0 0;">Every item you track, with its current pricing status. Unpriced items are listed first.</p>';
       html += '</div>';
       html += '<div style="overflow-x: auto;">';
-      html += buildWatchlistTable(watchlist);
+      html += buildWatchlistTable(watchlist, await loadListingStats());
       html += '</div>';
       html += '</div>';
 

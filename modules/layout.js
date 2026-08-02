@@ -564,6 +564,7 @@ module.exports = function renderPage(title, bodyContent) {
       .wl-badge.ok     { background: var(--ok-bg);     color: var(--ok-text); }
       .wl-badge.warn   { background: var(--warn-bg);   color: var(--warn-text); }
       .wl-badge.muted  { background: var(--surface-alt); color: var(--text-muted); }
+      .wl-badge.danger { background: var(--danger-bg);  color: var(--danger-text); }
 
       .empty-note {
         text-align: center;
