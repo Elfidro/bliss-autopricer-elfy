@@ -1,7 +1,0 @@
-{
-  "pm2ProcessName": "tf2autobot",
-  "tf2AutobotDir": "../../../tf2autobot-5.13.2",
-  "botTradingDir": "files/blisstrading",
-  "port": 3000,
-  "ageThresholdSec": 7200
-}
