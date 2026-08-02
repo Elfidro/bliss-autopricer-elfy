@@ -38,6 +38,15 @@ const { router: websocketStatus } = require('./routes/websocket-status.js');
 const { router: schemaStatus, setSchemaManager } = require('./routes/schema-status.js');
 
 app.use('/items', items_endpoint);
+// tf2autobot's custom-pricer client requests single items from the SINGULAR
+// path and only uses the plural for its bulk fetch. From
+// dist/lib/pricer/custom/custom-pricer-api.js:
+//   getPrice:  GET  `/item${this.url ? '' : 's'}/${sku}`
+//   getPricelist: GET '/items'
+// With a custom pricerUrl set, this.url is truthy, so every per-item lookup
+// goes to /item/:sku. Serving only /items made those 404 while the bulk
+// endpoint worked, which is why autoprice failed on every individual item.
+app.use('/item', items_endpoint);
 app.use('/websocket-status', websocketStatus);
 app.use('/schema-status', schemaStatus);
 
