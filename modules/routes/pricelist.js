@@ -198,8 +198,7 @@ module.exports = function (app, config, configManager) {
     }
   }
 
-  // Mirrors the gate in getPricableItems: current_buy_count > minListingCount,
-  // so the count actually needed is one more than the configured value.
+  // Mirrors the gate in getPricableItems: current_buy_count >= minListingCount.
   function listingCell(row, stats) {
     const sku = resolveSku(row);
     if (!sku) {
@@ -209,8 +208,7 @@ module.exports = function (app, config, configManager) {
       return '<span class="wl-none">unavailable</span>';
     }
 
-    const minListings = Number(baseConfig.minListingCount) || 3;
-    const need = minListings + 1;
+    const need = Number(baseConfig.minListingCount) || 3;
     const s = stats.get(sku);
     const buy = s ? Number(s.current_buy_count) || 0 : 0;
     const sell = s ? Number(s.current_sell_count) || 0 : 0;
@@ -218,7 +216,7 @@ module.exports = function (app, config, configManager) {
     if (buy === 0 && sell === 0) {
       return '<span class="wl-badge muted" title="Tracked, but no listings have come through the feed yet">○ Waiting</span>';
     }
-    if (buy > minListings) {
+    if (buy >= need) {
       return `<span class="wl-badge ok" title="Enough buy listings to price">● ${buy} buy / ${sell} sell</span>`;
     }
     return `<span class="wl-badge warn" title="Collecting — needs ${need} buy listings to price">◐ ${buy} buy / ${sell} sell (need ${need})</span>`;
@@ -277,10 +275,14 @@ module.exports = function (app, config, configManager) {
     return tbl;
   }
 
-  function buildMissingTable(names) {
+  // Every name here comes from item_list.json (see `missing` in loadData), so
+  // these items are already tracked by definition. The old "Add to Tracker"
+  // button in this table could never do anything and is gone; use the Listings
+  // column in the Watchlist section to see whether an item is collecting.
+  function buildMissingTable(names, stats) {
     if (names.length === 0) {
       return `
-        <div style="text-align: center; padding: 40px; color: #666;">
+        <div class="empty-note">
           <h4>🎉 All Items Have Prices</h4>
           <p>All items in your watchlist have current price data!</p>
         </div>
@@ -291,18 +293,14 @@ module.exports = function (app, config, configManager) {
     let tbl = '<table class="wl-table miss-table">';
     tbl += '<thead><tr>';
     tbl += '<th class="wl-name">Item Name</th>';
-    tbl += '<th>Action</th>';
+    tbl += '<th>Listings</th>';
     tbl += '</tr></thead>';
     tbl += '<tbody>';
 
     names.forEach((name) => {
       tbl += `<tr class="miss-row" data-age="0" data-inbot="false">`;
       tbl += `<td class="wl-name name">${name}</td>`;
-      tbl += `<td style="text-align: center;">`;
-      tbl += `<button onclick="queueAction('addName', '${encodeURIComponent(name)}')" `;
-      tbl += `style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;" `;
-      tbl += `title="Add ${name} to tracked items">✅ Add to Tracker</button>`;
-      tbl += '</td>';
+      tbl += `<td>${listingCell({ name }, stats)}</td>`;
       tbl += '</tr>';
     });
 
@@ -372,6 +370,7 @@ module.exports = function (app, config, configManager) {
       }
 
       const { outdated, current, missing, sell, watchlist } = loadData();
+      const listingStats = await loadListingStats();
 
       let html = '<div style="max-width: 1400px; margin: 0 auto; padding: 20px;">';
 
@@ -490,7 +489,7 @@ module.exports = function (app, config, configManager) {
         '<p style="margin: 5px 0 0 0;">Every item you track, with its current pricing status. Unpriced items are listed first.</p>';
       html += '</div>';
       html += '<div style="overflow-x: auto;">';
-      html += buildWatchlistTable(watchlist, await loadListingStats());
+      html += buildWatchlistTable(watchlist, listingStats);
       html += '</div>';
       html += '</div>';
 
@@ -534,7 +533,7 @@ module.exports = function (app, config, configManager) {
           '<p style="margin: 5px 0 0 0; color: #856404;">Items in your watchlist without price data</p>';
         html += '</div>';
         html += '<div style="padding: 20px;">';
-        html += buildMissingTable(missing);
+        html += buildMissingTable(missing, listingStats);
         html += '</div>';
         html += '</div>';
       }

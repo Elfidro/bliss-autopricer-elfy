@@ -163,11 +163,11 @@ function requiresSellListings() {
 
 async function getPricableItems(db) {
   const minListings = config.minListingCount || 3;
-  const sellClause = requiresSellListings() ? 'AND current_sell_count > $1' : '';
+  const sellClause = requiresSellListings() ? 'AND current_sell_count >= $1' : '';
   const rows = await db.any(
     `
     SELECT sku FROM listing_stats
-    WHERE current_buy_count > $1 ${sellClause}
+    WHERE current_buy_count >= $1 ${sellClause}
   `,
     [minListings]
   );
@@ -254,12 +254,12 @@ const KILLSTREAK_TIERS = {
 async function getKsItemNamesToPrice(db, allItemNames) {
   console.log(`Getting killstreak items with enough listings...`);
   const minListings = config.minListingCount || 3;
-  const sellClause = requiresSellListings() ? 'AND current_sell_count > $1' : '';
+  const sellClause = requiresSellListings() ? 'AND current_sell_count >= $1' : '';
   const rows = await db.any(
     `
     SELECT sku FROM listing_stats
     WHERE (sku LIKE '%;kt-1' OR sku LIKE '%;kt-2' OR sku LIKE '%;kt-3')
-      AND current_buy_count > $1 ${sellClause}
+      AND current_buy_count >= $1 ${sellClause}
   `,
     [minListings]
   );
