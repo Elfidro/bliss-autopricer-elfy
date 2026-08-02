@@ -165,6 +165,58 @@ module.exports = function (app, config, configManager) {
     return tbl;
   }
 
+  function buildWatchlistTable(rows) {
+    if (rows.length === 0) {
+      return `
+        <div class="empty-note">
+          <h4>Watchlist is empty</h4>
+          <p>Add items with the form above to start tracking prices for them.</p>
+        </div>
+      `;
+    }
+
+    const STATUS = {
+      current: { label: 'Current', cls: 'ok' },
+      outdated: { label: 'Outdated', cls: 'warn' },
+      unpriced: { label: 'Unpriced', cls: 'muted' },
+    };
+
+    let tbl = '<table class="wl-table">';
+    tbl += '<thead><tr>';
+    tbl += '<th class="wl-name">Item Name</th>';
+    tbl += '<th>Status</th><th>Buy Price</th><th>Sell Price</th>';
+    tbl += '<th>Age</th><th>In Bot</th>';
+    tbl += '</tr></thead><tbody>';
+
+    rows.forEach((row) => {
+      const st = STATUS[row.status];
+      const priced = row.status !== 'unpriced';
+      const buyUnit = priced && row.buy.keys === 1 ? 'Key' : 'Keys';
+      const sellUnit = priced && row.sell.keys === 1 ? 'Key' : 'Keys';
+      const nameHtml = row.sku
+        ? `<a href="${externalLinks.autobotTfBaseUrl}/items/${row.sku}" class="wl-link" target="_blank" rel="noopener noreferrer" title="View ${row.name} on autobot.tf">${row.name}</a>`
+        : row.name;
+
+      tbl += `<tr class="wl-row wl-${row.status}" data-name="${row.name.toLowerCase()}">`;
+      tbl += `<td class="wl-name">${nameHtml}</td>`;
+      tbl += `<td><span class="wl-badge ${st.cls}">${st.label}</span></td>`;
+      tbl += priced
+        ? `<td class="wl-buy">${row.buy.keys} ${buyUnit} + ${row.buy.metal} Ref</td>`
+        : '<td class="wl-none">—</td>';
+      tbl += priced
+        ? `<td class="wl-sell">${row.sell.keys} ${sellUnit} + ${row.sell.metal} Ref</td>`
+        : '<td class="wl-none">—</td>';
+      tbl += priced
+        ? `<td>${(row.age / 3600).toFixed(1)}h</td>`
+        : '<td class="wl-none">—</td>';
+      tbl += `<td>${row.inSelling ? '✅' : '—'}</td>`;
+      tbl += '</tr>';
+    });
+
+    tbl += '</tbody></table>';
+    return tbl;
+  }
+
   function buildMissingTable(names) {
     if (names.length === 0) {
       return `
@@ -176,24 +228,17 @@ module.exports = function (app, config, configManager) {
     }
 
     names.sort();
-    let tbl =
-      '<table style="width: 100%; border-collapse: collapse; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">';
-    tbl += '<thead style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">';
-    tbl += '<tr>';
-    tbl +=
-      '<th style="padding: 15px 12px; text-align: left; border-bottom: 2px solid #dee2e6; font-weight: 600; font-size: 14px; color: #495057;">Item Name</th>';
-    tbl +=
-      '<th style="padding: 15px 12px; text-align: center; border-bottom: 2px solid #dee2e6; font-weight: 600; font-size: 14px; color: #495057;">Action</th>';
-    tbl += '</tr>';
-    tbl += '</thead>';
+    let tbl = '<table class="wl-table miss-table">';
+    tbl += '<thead><tr>';
+    tbl += '<th class="wl-name">Item Name</th>';
+    tbl += '<th>Action</th>';
+    tbl += '</tr></thead>';
     tbl += '<tbody>';
 
-    names.forEach((name, index) => {
-      const baseColor = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
-      const rowStyle = `background-color: ${baseColor}; border-left: 4px solid #17a2b8;`;
-      tbl += `<tr data-age="0" data-inbot="false" style="${rowStyle}">`;
-      tbl += `<td class="name" style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;">${name}</td>`;
-      tbl += `<td style="padding: 12px; border-bottom: 1px solid #eee; text-align: center;">`;
+    names.forEach((name) => {
+      tbl += `<tr class="miss-row" data-age="0" data-inbot="false">`;
+      tbl += `<td class="wl-name name">${name}</td>`;
+      tbl += `<td style="text-align: center;">`;
       tbl += `<button onclick="queueAction('addName', '${encodeURIComponent(name)}')" `;
       tbl += `style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;" `;
       tbl += `title="Add ${name} to tracked items">✅ Add to Tracker</button>`;
@@ -215,16 +260,37 @@ module.exports = function (app, config, configManager) {
       current = [],
       priced = new Set();
 
+    const byName = new Map();
+
     main.items.forEach((item) => {
       const age = now - item.time;
       const inSelling = Boolean(sell[item.sku]);
       priced.add(item.name);
       const annotated = { ...item, age, inSelling };
+      byName.set(item.name, annotated);
       (age > thresholdSec ? outdated : current).push(annotated);
     });
 
     const missing = itemList.filter((n) => !priced.has(n));
-    return { outdated, current, missing, sell };
+
+    // Every watchlist entry with its pricing status, so the whole tracker can
+    // be seen in one place rather than split across Outdated / Current /
+    // Unpriced. Unpriced items sort first since they are the ones needing
+    // attention.
+    const statusRank = { unpriced: 0, outdated: 1, current: 2 };
+    const watchlist = itemList
+      .map((name) => {
+        const p = byName.get(name);
+        if (!p) {
+          return { name, status: 'unpriced', inSelling: false };
+        }
+        return { ...p, status: p.age > thresholdSec ? 'outdated' : 'current' };
+      })
+      .sort(
+        (a, b) => statusRank[a.status] - statusRank[b.status] || a.name.localeCompare(b.name)
+      );
+
+    return { outdated, current, missing, sell, watchlist };
   }
 
   router.get('/', (req, res) => {
@@ -245,7 +311,7 @@ module.exports = function (app, config, configManager) {
         return res.send(renderPage('Pricelist Manager - No Bot Configured', html));
       }
 
-      const { outdated, current, missing, sell } = loadData();
+      const { outdated, current, missing, sell, watchlist } = loadData();
 
       let html = '<div style="max-width: 1400px; margin: 0 auto; padding: 20px;">';
 
@@ -341,6 +407,18 @@ module.exports = function (app, config, configManager) {
       html += '<ul id="queue-list" style="list-style: none; padding: 0; margin: 0;"></ul>';
       html +=
         '<button id="apply-queue-btn" onclick="applyQueue()" style="width: 100%; background: #007cba; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px;">Apply All</button>';
+      html += '</div>';
+      html += '</div>';
+
+      // Watchlist Section — every tracked item in one place, with its status.
+      html += '<div class="panel">';
+      html += '<div class="panel-head wl-head">';
+      html += `<h3 style="margin: 0;">📋 Watchlist (${watchlist.length})</h3>`;
+      html +=
+        '<p style="margin: 5px 0 0 0;">Every item you track, with its current pricing status. Unpriced items are listed first.</p>';
+      html += '</div>';
+      html += '<div style="overflow-x: auto;">';
+      html += buildWatchlistTable(watchlist);
       html += '</div>';
       html += '</div>';
 

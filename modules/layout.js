@@ -483,6 +483,83 @@ module.exports = function renderPage(title, bodyContent) {
       .bnd-link { color: var(--text); text-decoration: none; }
       .bnd-link:hover { text-decoration: underline; }
 
+      /* Section panels */
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 20px;
+      }
+
+      .panel-head {
+        padding: 15px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-alt);
+      }
+
+      .panel-head p { color: var(--text-muted); }
+      .wl-head { background: var(--info-bg); }
+      .wl-head h3, .wl-head p { color: var(--info-text); }
+
+      /* Watchlist table */
+      .wl-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        margin-bottom: 0;
+        box-shadow: none;
+      }
+
+      .wl-table th {
+        padding: 14px 12px;
+        text-align: center;
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--text-muted);
+        background: var(--surface-alt);
+        border-bottom: 2px solid var(--border-strong);
+      }
+
+      .wl-table td {
+        padding: 12px;
+        text-align: center;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .wl-table .wl-name { text-align: left; font-weight: bold; }
+      .wl-link { color: var(--text); text-decoration: none; }
+      .wl-link:hover { text-decoration: underline; }
+      .wl-none { color: var(--text-muted); }
+      .wl-buy { color: var(--buy-text); font-weight: bold; }
+      .wl-sell { color: var(--sell-text); font-weight: bold; }
+
+      /* Left accent marks status without relying on row background alone. */
+      .wl-row { border-left: 4px solid transparent; }
+      .wl-unpriced { border-left-color: #6c757d; }
+      .wl-outdated { border-left-color: #f39c12; }
+      .wl-current  { border-left-color: #28a745; }
+      .miss-row    { border-left: 4px solid #17a2b8; }
+
+      .wl-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .wl-badge.ok     { background: var(--ok-bg);     color: var(--ok-text); }
+      .wl-badge.warn   { background: var(--warn-bg);   color: var(--warn-text); }
+      .wl-badge.muted  { background: var(--surface-alt); color: var(--text-muted); }
+
+      .empty-note {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-muted);
+      }
+
       /* Responsive design */
       @media (max-width: 768px) {
         .nav-container {
