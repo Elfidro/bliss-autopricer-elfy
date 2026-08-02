@@ -115,21 +115,28 @@ module.exports = function (app, config, configManager) {
         console.warn(`Schema unavailable — adding "${name}" without verification.`);
       }
 
+      // Store the schema's canonical name, not what was typed. The websocket
+      // only ingests listings whose name is an exact match against this list
+      // (websocket/bptfWebSocket.js), so "Nanobalaclava" instead of "The
+      // Nanobalaclava" would silently collect nothing and never price.
+      const canonical = check.matchedName || name;
+
       const paths = getBotPaths();
       const itemList = loadJson(paths.itemListPath);
-      if (itemList.items.some((i) => i.name === name)) {
+      if (itemList.items.some((i) => i.name === canonical)) {
         return wantsJson
           ? res.json({ ok: true, duplicate: true })
-          : res.redirect(`/?addError=${encodeURIComponent(`"${name}" is already tracked.`)}`);
+          : res.redirect(`/?addError=${encodeURIComponent(`"${canonical}" is already tracked.`)}`);
       }
 
-      itemList.items.push({ name });
+      itemList.items.push({ name: canonical });
       saveJson(paths.itemListPath, itemList);
 
-      console.log(`Added item: ${name}${check.sku ? ` (${check.sku})` : ''}`);
+      const renamed = canonical !== name ? ` (matched as "${canonical}")` : '';
+      console.log(`Added item: ${canonical}${check.sku ? ` (${check.sku})` : ''}`);
       return wantsJson
-        ? res.json({ ok: true, sku: check.sku })
-        : res.redirect(`/?added=${encodeURIComponent(name)}`);
+        ? res.json({ ok: true, sku: check.sku, name: canonical })
+        : res.redirect(`/?added=${encodeURIComponent(canonical + renamed)}`);
     } catch (error) {
       console.error('Error adding item:', error);
       return fail(500, error.message);
