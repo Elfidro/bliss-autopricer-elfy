@@ -403,6 +403,86 @@ module.exports = function renderPage(title, bodyContent) {
       html[data-theme="dark"] [style*="color:#155724"],
       html[data-theme="dark"] [style*="color: #155724"] { color: var(--ok-text) !important; }
 
+      /*
+        Price bounds table. Buy and sell columns are tinted instead of the rows
+        being zebra-striped, so the side being edited stays identifiable once
+        the header has scrolled out of view.
+      */
+      :root {
+        --buy-tint: #f1f8f3;   --buy-tint-head: #e2f1e8;
+        --sell-tint: #fdf3f4;  --sell-tint-head: #fae3e5;
+        --buy-text: #1e7e34;   --sell-text: #c82333;
+      }
+
+      html[data-theme="dark"] {
+        --buy-tint: #101d17;   --buy-tint-head: #16291e;
+        --sell-tint: #211215;  --sell-tint-head: #2c181c;
+        --buy-text: #7ee2a8;   --sell-text: #ff9ea6;
+      }
+
+      .bounds-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+        background: var(--surface);
+      }
+
+      .bounds-table th,
+      .bounds-table td {
+        border-bottom: 1px solid var(--border);
+        text-align: center;
+      }
+
+      .bounds-table thead th {
+        padding: 12px 8px;
+        font-weight: 600;
+        border-bottom: 2px solid var(--border-strong);
+      }
+
+      .bounds-table .bnd-subhead th {
+        padding: 8px;
+        font-size: 0.9em;
+        font-weight: 500;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border-strong);
+      }
+
+      .bounds-table .bnd-name {
+        text-align: left;
+        padding: 12px;
+        min-width: 200px;
+        font-weight: bold;
+        background: var(--surface);
+      }
+
+      .bounds-table td.bnd { padding: 8px; }
+
+      .bounds-table .buy  { background: var(--buy-tint); }
+      .bounds-table .sell { background: var(--sell-tint); }
+      .bounds-table thead .buy  { background: var(--buy-tint-head); color: var(--buy-text); }
+      .bounds-table thead .sell { background: var(--sell-tint-head); color: var(--sell-text); }
+
+      /* Divider between the buy group and the sell group. */
+      .bounds-table .grp-end { border-right: 2px solid var(--border-strong); }
+
+      .bounds-table input[type=number] {
+        padding: 4px;
+        border: 1px solid var(--border-strong);
+        border-radius: 3px;
+        text-align: center;
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      /* Keep the column tint visible on hover instead of the global row wash. */
+      .bounds-table tbody tr:hover { background: transparent; }
+      .bounds-table tbody tr:hover td {
+        box-shadow: inset 0 0 0 9999px rgba(127, 127, 127, 0.09);
+      }
+
+      .bnd-link { color: var(--text); text-decoration: none; }
+      .bnd-link:hover { text-decoration: underline; }
+
       /* Responsive design */
       @media (max-width: 768px) {
         .nav-container {

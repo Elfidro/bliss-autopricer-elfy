@@ -57,89 +57,59 @@ module.exports = function (app) {
         </div>
         <form method="POST" action="/bounds" style="padding: 20px;">
           <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <table class="bounds-table">
               <thead>
-                <tr style="background: #f8f9fa;">
-                  <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; min-width: 200px;">Item Name</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #28a745;" colspan="2">🟢 Buy Min</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #28a745;" colspan="2">🟢 Buy Max</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #dc3545;" colspan="2">🔴 Sell Min</th>
-                  <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; color: #dc3545;" colspan="2">🔴 Sell Max</th>
+                <tr>
+                  <th class="bnd-name">Item Name</th>
+                  <th class="bnd buy" colspan="2">🟢 Buy Min</th>
+                  <th class="bnd buy grp-end" colspan="2">🟢 Buy Max</th>
+                  <th class="bnd sell" colspan="2">🔴 Sell Min</th>
+                  <th class="bnd sell" colspan="2">🔴 Sell Max</th>
                 </tr>
-                <tr style="background: #f8f9fa; font-size: 0.9em;">
-                  <th style="padding: 8px; border-bottom: 1px solid #ddd;"></th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Keys</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Metal</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Keys</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Metal</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Keys</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Metal</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Keys</th>
-                  <th style="padding: 8px; text-align: center; border-bottom: 1px solid #ddd;">Metal</th>
+                <tr class="bnd-subhead">
+                  <th class="bnd-name"></th>
+                  <th class="bnd buy">Keys</th>
+                  <th class="bnd buy">Metal</th>
+                  <th class="bnd buy">Keys</th>
+                  <th class="bnd buy grp-end">Metal</th>
+                  <th class="bnd sell">Keys</th>
+                  <th class="bnd sell">Metal</th>
+                  <th class="bnd sell">Keys</th>
+                  <th class="bnd sell">Metal</th>
                 </tr>
               </thead>
               <tbody>`;
 
+    // Buy and sell columns are tinted rather than zebra-striped, so the side
+    // you are editing stays obvious once the header has scrolled away.
+    const BOUND_COLS = [
+      { side: 'buy', field: 'minBuyKeys', step: '1', mode: 'numeric', ph: '0', w: 60 },
+      { side: 'buy', field: 'minBuyMetal', step: '0.01', mode: 'decimal', ph: '0.00', w: 70 },
+      { side: 'buy', field: 'maxBuyKeys', step: '1', mode: 'numeric', ph: '∞', w: 60 },
+      { side: 'buy', field: 'maxBuyMetal', step: '0.01', mode: 'decimal', ph: '∞', w: 70, last: true },
+      { side: 'sell', field: 'minSellKeys', step: '1', mode: 'numeric', ph: '0', w: 60 },
+      { side: 'sell', field: 'minSellMetal', step: '0.01', mode: 'decimal', ph: '0.00', w: 70 },
+      { side: 'sell', field: 'maxSellKeys', step: '1', mode: 'numeric', ph: '∞', w: 60 },
+      { side: 'sell', field: 'maxSellMetal', step: '0.01', mode: 'decimal', ph: '∞', w: 70 },
+    ];
+
     items.forEach((item, idx) => {
-      const rowStyle = idx % 2 === 0 ? 'background: #f9f9f9;' : '';
-      
       // Build the item name cell with optional autobot.tf link if SKU is available
       let itemNameHtml = item.name;
       if (item.sku) {
-        itemNameHtml = `<a href="${externalLinks.autobotTfBaseUrl}/items/${item.sku}" style="color:#495057; text-decoration: none;" target="_blank" title="View ${item.name} on autobot.tf">${item.name} 🔗</a>`;
+        itemNameHtml = `<a href="${externalLinks.autobotTfBaseUrl}/items/${item.sku}" class="bnd-link" target="_blank" title="View ${item.name} on autobot.tf">${item.name} 🔗</a>`;
       }
       
       tbl += `
-        <tr class="item-row" data-name="${item.name.toLowerCase()}" style="${rowStyle}">
-          <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: bold;">${itemNameHtml}</td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="1" name="minBuyKeys_${idx}" value="${item.minBuyKeys ?? ''}" 
-                   lang="en" inputmode="numeric"
-                   style="width: 60px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="0">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="0.01" name="minBuyMetal_${idx}" value="${item.minBuyMetal ?? ''}" 
-                   lang="en" inputmode="decimal"
-                   style="width: 70px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="0.00">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="1" name="maxBuyKeys_${idx}" value="${item.maxBuyKeys ?? ''}" 
-                   lang="en" inputmode="numeric"
-                   style="width: 60px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="∞">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="0.01" name="maxBuyMetal_${idx}" value="${item.maxBuyMetal ?? ''}" 
-                   lang="en" inputmode="decimal"
-                   style="width: 70px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="∞">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="1" name="minSellKeys_${idx}" value="${item.minSellKeys ?? ''}" 
-                   lang="en" inputmode="numeric"
-                   style="width: 60px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="0">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="0.01" name="minSellMetal_${idx}" value="${item.minSellMetal ?? ''}" 
-                   lang="en" inputmode="decimal"
-                   style="width: 70px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="0.00">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="1" name="maxSellKeys_${idx}" value="${item.maxSellKeys ?? ''}" 
-                   lang="en" inputmode="numeric"
-                   style="width: 60px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="∞">
-          </td>
-          <td style="padding: 8px; text-align: center; border-bottom: 1px solid #eee;">
-            <input type="number" step="0.01" name="maxSellMetal_${idx}" value="${item.maxSellMetal ?? ''}" 
-                   lang="en" inputmode="decimal"
-                   style="width: 70px; padding: 4px; border: 1px solid #ddd; border-radius: 3px; text-align: center;" 
-                   placeholder="∞">
-          </td>
+        <tr class="item-row" data-name="${item.name.toLowerCase()}">
+          <td class="bnd-name">${itemNameHtml}</td>
+          ${BOUND_COLS.map(
+            (c) => `<td class="bnd ${c.side}${c.last ? ' grp-end' : ''}">
+            <input type="number" step="${c.step}" name="${c.field}_${idx}" value="${item[c.field] ?? ''}"
+                   lang="en" inputmode="${c.mode}" style="width: ${c.w}px;"
+                   placeholder="${c.ph}">
+          </td>`
+          ).join('')}
           <input type="hidden" name="name_${idx}" value="${item.name}">
         </tr>`;
     });

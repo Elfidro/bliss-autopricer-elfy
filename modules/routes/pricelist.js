@@ -500,7 +500,7 @@ module.exports = function (app, config, configManager) {
                 actionText = \`❌ Remove \${q.sku}\`;
                 actionColor = '#dc3545';
               } else if (q.action === 'addName') {
-                actionText = \`➕ Add Item: \${decodeURIComponent(q.name)}\`;
+                actionText = \`➕ Add Item: \${q.name}\`;
                 actionColor = '#17a2b8';
               }
 
@@ -535,7 +535,16 @@ module.exports = function (app, config, configManager) {
             let sku, name, min, max;
             
             if (action === 'addName') {
-              name = value;
+              // The onclick attribute carries the name URL-encoded so quotes and
+              // apostrophes cannot break out of it. Decode once here so the queue
+              // holds the real name — applyQueue re-encodes it for the POST body.
+              // Without this the name is encoded twice and stored with literal
+              // %20 sequences in item_list.json.
+              try {
+                name = decodeURIComponent(value);
+              } catch {
+                name = value;
+              }
             } else {
               sku = value;
               if (action === 'add') {

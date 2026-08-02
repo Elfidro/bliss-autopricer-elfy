@@ -1006,16 +1006,26 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
       // so a placeholder that undercuts the bptf baseline is rejected.
       const marginRef = Number(config.priceWithoutSellListings.sellMarginRef) || 5;
       const buyInMetal = Methods.toMetal(final_buyObj, keyobj.metal);
-      const sellInMetal = Methods.getRight(buyInMetal + marginRef);
 
-      if (sku === '5021;6') {
-        final_sellObj.keys = 0;
-        final_sellObj.metal = sellInMetal;
-      } else {
-        const keys = Math.trunc(sellInMetal / keyobj.metal);
-        final_sellObj.keys = keys;
-        final_sellObj.metal = Methods.getRight(sellInMetal - keys * keyobj.metal);
+      // A flat margin only makes sense below a key. At or above that, the margin
+      // is a rounding error against the item's value, so fall back to the normal
+      // rule and wait for real sell listings. Keys themselves are excluded
+      // outright — a key's buy price sits just under keyobj.metal and would
+      // otherwise slip through this check.
+      if (sku === '5021;6' || buyInMetal >= keyobj.metal) {
+        throw new Error(
+          `| UPDATING PRICES |: ${name} not enough sell listings... ` +
+            `(buy ${buyInMetal} ref is at or above a key, so the ` +
+            `buy + ${marginRef} ref placeholder does not apply)`
+        );
       }
+
+      // The buy price is below a key but buy + margin can still cross one, so
+      // normalise into keys + remainder the same way the main path does.
+      const sellInMetal = Methods.getRight(buyInMetal + marginRef);
+      const sellKeys = Math.trunc(sellInMetal / keyobj.metal);
+      final_sellObj.keys = sellKeys;
+      final_sellObj.metal = Methods.getRight(sellInMetal - sellKeys * keyobj.metal);
 
       console.log(
         `| UPDATING PRICES |: ${name} has no sell listings — using buy + ${marginRef} ref ` +
