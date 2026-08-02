@@ -2,6 +2,7 @@
 const path = require('path');
 const { exec } = require('child_process');
 const { loadJson, saveJson } = require('../utils');
+const { validateItemName } = require('../schemaInstance');
 
 module.exports = function (app, config, configManager) {
   // Helper function to get current bot paths
@@ -87,24 +88,51 @@ module.exports = function (app, config, configManager) {
   });
 
   app.post('/add-item', (req, res) => {
+    // The queue panel posts via fetch and ignores redirects, so answer it with
+    // a status code it can act on. Form posts get a redirect with a message.
+    const wantsJson = !String(req.get('accept') || '').includes('text/html');
+    const fail = (status, message) => {
+      if (wantsJson) {
+        return res.status(status).json({ ok: false, error: message });
+      }
+      return res.redirect(`/?addError=${encodeURIComponent(message)}`);
+    };
+
     try {
-      const { name } = req.body;
+      const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
       if (!name) {
-        return res.redirect('back');
+        return fail(400, 'No item name given.');
+      }
+
+      // Reject names the TF2 schema does not know, so typos and pasted junk
+      // do not sit in the watchlist unpriced forever.
+      const check = validateItemName(name);
+      if (!check.ok) {
+        console.warn(`Rejected item "${name}": ${check.reason}`);
+        return fail(400, check.reason);
+      }
+      if (check.unverified) {
+        console.warn(`Schema unavailable — adding "${name}" without verification.`);
       }
 
       const paths = getBotPaths();
       const itemList = loadJson(paths.itemListPath);
-      if (!itemList.items.some((i) => i.name === name)) {
-        itemList.items.push({ name });
-        saveJson(paths.itemListPath, itemList);
+      if (itemList.items.some((i) => i.name === name)) {
+        return wantsJson
+          ? res.json({ ok: true, duplicate: true })
+          : res.redirect(`/?addError=${encodeURIComponent(`"${name}" is already tracked.`)}`);
       }
 
-      console.log(`Added item: ${name}`);
-      res.redirect('back');
+      itemList.items.push({ name });
+      saveJson(paths.itemListPath, itemList);
+
+      console.log(`Added item: ${name}${check.sku ? ` (${check.sku})` : ''}`);
+      return wantsJson
+        ? res.json({ ok: true, sku: check.sku })
+        : res.redirect(`/?added=${encodeURIComponent(name)}`);
     } catch (error) {
       console.error('Error adding item:', error);
-      res.status(500).send('Error: ' + error.message);
+      return fail(500, error.message);
     }
   });
 

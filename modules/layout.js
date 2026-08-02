@@ -483,6 +483,17 @@ module.exports = function renderPage(title, bodyContent) {
       .bnd-link { color: var(--text); text-decoration: none; }
       .bnd-link:hover { text-decoration: underline; }
 
+      /* Flash messages */
+      .flash {
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        font-weight: 500;
+      }
+
+      .flash-error { background: var(--danger-bg); color: var(--danger-text); }
+      .flash-ok    { background: var(--ok-bg);     color: var(--ok-text); }
+
       /* Section panels */
       .panel {
         background: var(--surface);

@@ -64,6 +64,9 @@ const schemaManager = new EnhancedSchemaManager(originalSchemaManager, config);
 // Connect schema manager to API for monitoring
 setSchemaManager(schemaManager);
 
+// Share it with the web routes so /add-item can verify names against the schema
+require('./modules/schemaInstance').setSchemaManager(schemaManager);
+
 // Steam IDs of bots that we want to ignore listings from.
 const excludedSteamIds = config.excludedSteamIDs;
 

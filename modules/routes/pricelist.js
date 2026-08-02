@@ -315,6 +315,18 @@ module.exports = function (app, config, configManager) {
 
       let html = '<div style="max-width: 1400px; margin: 0 auto; padding: 20px;">';
 
+      // Result of the last /add-item, when it came from the plain form post.
+      const esc = (s) =>
+        String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+        );
+      if (req.query.addError) {
+        html += `<div class="flash flash-error">⚠️ ${esc(req.query.addError)}</div>`;
+      } else if (req.query.added) {
+        html += `<div class="flash flash-ok">✅ Added "${esc(req.query.added)}" to the watchlist.</div>`;
+      }
+
       // Header
       html +=
         '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
@@ -659,6 +671,7 @@ module.exports = function (app, config, configManager) {
             const button = document.getElementById('apply-queue-btn');
             button.disabled = true;
             button.textContent = 'Processing...';
+            const failures = [];
             
             try {
               for (let i = 0; i < queue.length; i++) {
@@ -679,18 +692,27 @@ module.exports = function (app, config, configManager) {
                   body = \`name=\${encodeURIComponent(q.name)}\`;
                 }
 
-                await fetch(url, {
+                const resp = await fetch(url, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                   body
                 });
+
+                if (!resp.ok) {
+                  let msg = '';
+                  try { msg = (await resp.json()).error; } catch (e) { msg = ''; }
+                  failures.push(msg || ('Failed: ' + (q.name || q.sku)));
+                }
               }
-              
+
               queue = [];
               refreshQueue();
-              
-              // Show success message and reload
-              alert('All actions applied successfully! Reloading page...');
+
+              if (failures.length) {
+                alert(failures.length + ' action(s) could not be applied:\\n\\n' + failures.join('\\n'));
+              } else {
+                alert('All actions applied successfully! Reloading page...');
+              }
               location.reload();
             } catch (error) {
               alert('Error applying actions: ' + error.message);
