@@ -150,5 +150,6 @@
       "buy": 25,
       "sell": -25
     }
-  }
+  },
+  "apiRequestLogging": true
 }

@@ -15,6 +15,23 @@ app.use(
 
 const config = getBaseConfigManager().getConfig();
 
+// Log every request with its status. tf2autobot reports only "status code 404"
+// with no indication of what it asked for, which makes a mismatch between the
+// URL it builds and the routes mounted here impossible to diagnose from its
+// side. Disable with apiRequestLogging: false.
+if (config.apiRequestLogging !== false) {
+  app.use((req, res, next) => {
+    const started = Date.now();
+    res.on('finish', () => {
+      console.log(
+        `[API] ${req.method} ${req.originalUrl} -> ${res.statusCode} ` +
+          `(${Date.now() - started}ms, from ${req.socket.remoteAddress})`
+      );
+    });
+    next();
+  });
+}
+
 // API routes.
 const items_endpoint = require('./routes/api/items.js');
 const { router: websocketStatus } = require('./routes/websocket-status.js');
