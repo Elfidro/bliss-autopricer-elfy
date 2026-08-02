@@ -11,29 +11,47 @@ const { hashPassword } = require('./modules/auth');
 
 const CONFIG_PATH = path.resolve(__dirname, 'config.json');
 
-function ask(rl, question, { hidden = false } = {}) {
-  return new Promise((resolve) => {
-    if (!hidden) {
-      rl.question(question, resolve);
+// Wraps readline so password prompts do not echo. Overriding _writeToOutput is
+// the standard approach and degrades cleanly when stdin is not a TTY.
+function createPrompt() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const write = rl._writeToOutput.bind(rl);
+  rl.muted = false;
+  rl._writeToOutput = function (str) {
+    if (rl.muted) {
       return;
     }
-    // Mute echo so the password is not printed as it is typed.
-    process.stdout.write(question);
-    const onData = (char) => {
-      if (['\n', '\r', ''].includes(char.toString())) {
-        process.stdin.removeListener('data', onData);
-      } else {
-        readline.moveCursor(process.stdout, -1000, 0);
-        readline.clearLine(process.stdout, 1);
-        process.stdout.write(question);
+    write(str);
+  };
+  return rl;
+}
+
+function ask(rl, question, { hidden = false } = {}) {
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      if (hidden) {
+        rl.muted = false;
+        process.stdout.write('\n');
       }
-    };
-    process.stdin.on('data', onData);
-    rl.question('', (value) => {
-      process.stdin.removeListener('data', onData);
-      process.stdout.write('\n');
-      resolve(value);
+      resolve(answer);
     });
+    // Set after question() so the prompt itself still prints.
+    rl.muted = hidden;
+  });
+}
+
+// When stdin is not a terminal (piped input, CI, scripted setup) readline's
+// question() chain does not survive the stream ending, so read the three
+// values as plain lines instead: username, password, confirmation.
+function readPipedLines() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on('end', () => resolve(data.split(/\r?\n/)));
+    process.stdin.on('error', reject);
   });
 }
 
@@ -54,24 +72,35 @@ async function main() {
     process.exit(1);
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const existing = config.webAuth?.username || 'admin';
+  let username;
+  let password;
+  let confirm;
+  let rl = null;
+
+  if (process.stdin.isTTY) {
+    rl = createPrompt();
+    username = (await ask(rl, `Username [${existing}]: `)).trim() || existing;
+    password = await ask(rl, 'Password: ', { hidden: true });
+    confirm = await ask(rl, 'Confirm password: ', { hidden: true });
+  } else {
+    const lines = await readPipedLines();
+    username = (lines[0] || '').trim() || existing;
+    password = lines[1] || '';
+    confirm = lines[2] || '';
+  }
 
   try {
-    const existing = config.webAuth?.username || 'admin';
-    const username = (await ask(rl, `Username [${existing}]: `)).trim() || existing;
-    const password = await ask(rl, 'Password: ', { hidden: true });
-    const confirm = await ask(rl, 'Confirm password: ', { hidden: true });
-
     if (!password) {
-      console.error('\n❌ Password cannot be empty.');
+      console.error('❌ Password cannot be empty.');
       process.exit(1);
     }
     if (password !== confirm) {
-      console.error('\n❌ Passwords do not match.');
+      console.error('❌ Passwords do not match.');
       process.exit(1);
     }
     if (password.length < 8) {
-      console.error('\n❌ Use at least 8 characters.');
+      console.error('❌ Use at least 8 characters.');
       process.exit(1);
     }
 
@@ -87,7 +116,9 @@ async function main() {
     console.log('   Restart the pricer for it to take effect:');
     console.log('   pm2 restart bptf-autopricer\n');
   } finally {
-    rl.close();
+    if (rl) {
+      rl.close();
+    }
   }
 }
 
