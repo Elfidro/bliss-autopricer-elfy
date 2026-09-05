@@ -41,19 +41,22 @@ module.exports = function (app) {
   function buildBoundsTable(items) {
     if (items.length === 0) {
       return `
-        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <h3>📦 No Items Found</h3>
-          <p>No items are currently configured for price bounds management.</p>
-          <p>Items need to be added to your item list first before you can set price bounds.</p>
+        <div class="ui-card" style="text-align: center; padding: 36px 20px;">
+          <div style="font-size: 36px; margin-bottom: 10px;">📦</div>
+          <h3>No Items Found</h3>
+          <p style="margin: 0; color: var(--text-muted);">No items are currently configured for price bounds management.</p>
         </div>
       `;
     }
 
     let tbl = `
-      <div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin: 20px 0;">
-        <div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">
-          <h3 style="margin: 0;">⚙️ Price Bounds Configuration</h3>
-          <p style="margin: 5px 0 0 0; color: #666;">Set minimum and maximum price limits for buying and selling items</p>
+      <div class="table-container">
+        <div class="table-header-bar">
+          <div>
+            <h3 style="margin: 0;"><span>⚙️</span> Price Bounds Configuration</h3>
+            <p style="margin: 4px 0 0 0; color: var(--text-muted);">Set minimum and maximum price limits for buying and selling items</p>
+          </div>
+          <span class="badge badge-info" id="visibleCountBadge"><span id="visibleCount">${items.length}</span> items</span>
         </div>
         <form method="POST" action="/bounds" style="padding: 20px;">
           <div style="overflow-x: auto;">
@@ -80,8 +83,6 @@ module.exports = function (app) {
               </thead>
               <tbody>`;
 
-    // Buy and sell columns are tinted rather than zebra-striped, so the side
-    // you are editing stays obvious once the header has scrolled away.
     const BOUND_COLS = [
       { side: 'buy', field: 'minBuyKeys', step: '1', mode: 'numeric', ph: '0', w: 60 },
       { side: 'buy', field: 'minBuyMetal', step: '0.01', mode: 'decimal', ph: '0.00', w: 70 },
@@ -94,10 +95,9 @@ module.exports = function (app) {
     ];
 
     items.forEach((item, idx) => {
-      // Build the item name cell with optional autobot.tf link if SKU is available
       let itemNameHtml = item.name;
       if (item.sku) {
-        itemNameHtml = `<a href="${externalLinks.autobotTfBaseUrl}/items/${item.sku}" class="bnd-link" target="_blank" title="View ${item.name} on autobot.tf">${item.name} 🔗</a>`;
+        itemNameHtml = `<a href="${externalLinks.autobotTfBaseUrl}/items/${item.sku}" class="bnd-link" target="_blank" rel="noopener noreferrer" title="View ${item.name} on autobot.tf">${item.name} <span style="font-size: 11px; opacity: 0.6;">↗</span></a>`;
       }
       
       tbl += `
@@ -119,8 +119,8 @@ module.exports = function (app) {
             </table>
           </div>
           <input type="hidden" name="count" value="${items.length}">
-          <div style="text-align: center; padding-top: 15px; border-top: 1px solid #ddd;">
-            <button type="submit" style="background: #28a745; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          <div style="text-align: center; padding-top: 18px; border-top: 1px solid var(--border); margin-top: 14px;">
+            <button type="submit" class="btn btn-success" style="font-size: 1rem; padding: 12px 28px;">
               💾 Save All Price Bounds
             </button>
           </div>
@@ -142,7 +142,6 @@ module.exports = function (app) {
             }
           });
           
-          // Update visible count if you want to show it
           const countElement = document.getElementById('visibleCount');
           if (countElement) {
             countElement.textContent = visibleCount;
@@ -157,47 +156,15 @@ module.exports = function (app) {
     const itemList = loadJson(itemListPath).items || [];
     const priceList = loadJson(priceListPath).items || [];
     
-    // Create a map of item names to SKUs for efficient lookup
     const nameToSkuMap = new Map();
     priceList.forEach(priceItem => {
       nameToSkuMap.set(priceItem.name, priceItem.sku);
     });
     
-    // Enrich item list with SKU data
     const enrichedItemList = itemList.map(item => ({
       ...item,
       sku: nameToSkuMap.get(item.name) || null
     }));
-
-    let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
-
-    // Header
-    html +=
-      '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
-    html += '<h2>⚙️ Item Price Bounds Management</h2>';
-    html +=
-      '<p>Configure minimum and maximum price limits for buying and selling items. Leave fields blank to remove limits.</p>';
-    html += '</div>';
-
-    // Search/Filter Box
-    html +=
-      '<div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ddd;">';
-    html += '<label for="itemSearch" style="display: block; margin-bottom: 8px; font-weight: bold;">🔍 Search Items:</label>';
-    html +=
-      '<input type="text" id="itemSearch" placeholder="Type to filter items..." '
-    html +=
-      'style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" '
-    html +=
-      'oninput="filterItems(this.value)">';
-    html += '<small style="color: #666; display: block; margin-top: 5px;">Filter items by name in the table below</small>';
-    html += '</div>';
-
-    // Statistics Card
-    html +=
-      '<div style="background: #e8f4fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
-    html += '<h3>📊 Configuration Summary</h3>';
-    html += `<p><strong>Total Items:</strong> ${enrichedItemList.length}</p>`;
-    html += `<p><strong>Items with Price Data:</strong> ${enrichedItemList.filter(i => i.sku).length}</p>`;
 
     const boundsConfigured = enrichedItemList.filter(
       (item) =>
@@ -211,27 +178,91 @@ module.exports = function (app) {
         item.maxSellMetal !== undefined
     ).length;
 
-    html += `<p><strong>Items with Bounds:</strong> ${boundsConfigured}</p>`;
-    html += `<p><strong>Items without Bounds:</strong> ${enrichedItemList.length - boundsConfigured}</p>`;
-    html += '</div>';
+    let html = '<div style="max-width: 1560px; margin: 0 auto;">';
+
+    // Header
+    html += `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+            <span>⚙️</span> Item Price Bounds Management
+          </h1>
+          <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+            Configure minimum and maximum price boundaries for buying and selling items. Blank fields represent unconstrained pricing.
+          </p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <a href="/" class="btn btn-secondary"><span>📋</span> Price List</a>
+          <a href="/bot-config" class="btn btn-secondary"><span>🤖</span> Bot Config</a>
+        </div>
+      </div>
+    `;
+
+    // Stats Grid
+    html += `
+      <div class="stats-grid">
+        <div class="stat-card stat-info">
+          <div class="stat-top">
+            <span class="stat-title">Tracked Items</span>
+            <div class="stat-icon-wrapper">📦</div>
+          </div>
+          <div class="stat-value">${enrichedItemList.length}</div>
+          <p class="stat-desc">Total items in item_list.json</p>
+        </div>
+
+        <div class="stat-card stat-ok">
+          <div class="stat-top">
+            <span class="stat-title">Configured Bounds</span>
+            <div class="stat-icon-wrapper">⚖️</div>
+          </div>
+          <div class="stat-value">${boundsConfigured}</div>
+          <p class="stat-desc">Items with custom safety limits</p>
+        </div>
+
+        <div class="stat-card stat-warn">
+          <div class="stat-top">
+            <span class="stat-title">Unbounded Items</span>
+            <div class="stat-icon-wrapper">🔓</div>
+          </div>
+          <div class="stat-value">${enrichedItemList.length - boundsConfigured}</div>
+          <p class="stat-desc">Follow raw calculated market prices</p>
+        </div>
+
+        <div class="stat-card stat-ok">
+          <div class="stat-top">
+            <span class="stat-title">PriceDB Matched</span>
+            <div class="stat-icon-wrapper">🔑</div>
+          </div>
+          <div class="stat-value">${enrichedItemList.filter(i => i.sku).length}</div>
+          <p class="stat-desc">Items with verified schema SKUs</p>
+        </div>
+      </div>
+    `;
+
+    // Search Bar
+    html += `
+      <div class="ui-card" style="padding: 16px 20px; margin-bottom: 20px;">
+        <div class="search-input-wrap">
+          <span class="search-input-icon">🔍</span>
+          <input type="text" id="itemSearch" placeholder="Type to filter items by name..." oninput="filterItems(this.value)">
+        </div>
+      </div>
+    `;
 
     // Instructions Card
-    html +=
-      '<div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
-    html += '<h4>💡 How to Configure Price Bounds</h4>';
-    html += '<ul style="margin: 10px 0;">';
-    html +=
-      "<li><strong>Min Limits:</strong> Set the minimum price you're willing to buy/sell for</li>";
-    html +=
-      "<li><strong>Max Limits:</strong> Set the maximum price you're willing to buy/sell for</li>";
-    html +=
-      '<li><strong>Keys vs Metal:</strong> Use keys for high-value items, metal for low-value items</li>';
-    html +=
-      '<li><strong>Leave Blank:</strong> No limit will be applied for that price boundary</li>';
-    html +=
-      '<li><strong>🔗 Icon:</strong> Click the link icon next to item names to view current market prices on autobot.tf</li>';
-    html += '</ul>';
-    html += '</div>';
+    html += `
+      <div class="ui-card" style="padding: 18px 24px; margin-bottom: 24px; border-left: 4px solid var(--accent);">
+        <h4 style="margin-bottom: 8px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+          <span>💡</span> Price Bounds Guide
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; font-size: 0.88rem; color: var(--text-muted);">
+          <div><strong>Min Limits:</strong> Absolute floor for buying or selling. Price will never drop below this.</div>
+          <div><strong>Max Limits:</strong> Absolute ceiling for buying or selling. Price will never exceed this.</div>
+          <div><strong>Blank Fields:</strong> Leave empty for unconstrained calculation based on market listings.</div>
+          <div><strong>Direct Links:</strong> Click ↗ next to any item to verify its live market order book on autobot.tf.</div>
+        </div>
+      </div>
+    `;
 
     html += buildBoundsTable(enrichedItemList);
     html += '</div>';

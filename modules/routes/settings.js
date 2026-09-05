@@ -63,28 +63,36 @@ module.exports = function (app) {
         };
       }
 
-      let html = '<div style="max-width: 1000px; margin: 0 auto; padding: 20px;">';
+      let html = '<div style="max-width: 1200px; margin: 0 auto;">';
 
       // Success/Error messages
       if (req.query.success) {
-        html +=
-          '<div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px;">✅ Settings saved successfully!</div>';
+        html += '<div class="flash flash-ok"><span>✅</span> Settings saved successfully! Changes are active.</div>';
       }
       if (req.query.error) {
-        html +=
-          '<div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px;">❌ Error saving settings. Please try again.</div>';
+        html += '<div class="flash flash-error"><span>❌</span> Error saving settings. Please verify inputs and try again.</div>';
       }
 
       // Header
-      html +=
-        '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
-      html += '<h2>⚙️ Application Settings</h2>';
-      html += '<p>Configure API keys, database settings, and application preferences.</p>';
-      html += '</div>';
+      html += `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+              <span>⚙️</span> Application Settings
+            </h1>
+            <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+              Configure API keys, database credentials, price margin formulas, and trading safety thresholds.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <a href="/" class="btn btn-secondary"><span>📋</span> Price List</a>
+            <a href="/bot-config" class="btn btn-secondary"><span>🤖</span> Bot Config</a>
+          </div>
+        </div>
+      `;
 
       // Settings Form
-      html +=
-        '<form method="POST" action="/settings/update" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd;">';
+      html += '<form method="POST" action="/settings/update" class="ui-card" style="padding: 28px;">';
 
       // API Settings Section
       html += '<div style="margin-bottom: 30px;">';
@@ -587,11 +595,9 @@ module.exports = function (app) {
       html += '</div>';
 
       // Action Buttons
-      html += '<div style="border-top: 1px solid #ddd; padding-top: 20px; text-align: right;">';
-      html +=
-        '<button type="button" onclick="window.location.href=\'/\'" style="background: #6c757d; color: white; padding: 10px 20px; border: none; border-radius: 4px; margin-right: 10px; cursor: pointer;">Cancel</button>';
-      html +=
-        '<button type="submit" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">💾 Save Settings</button>';
+      html += '<div style="border-top: 1px solid var(--border); padding-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">';
+      html += '<button type="button" onclick="window.location.href=\'/\'" class="btn btn-secondary">Cancel</button>';
+      html += '<button type="submit" class="btn btn-success" style="padding: 10px 24px; font-size: 0.95rem;">💾 Save All Settings</button>';
       html += '</div>';
 
       html += '</form>';

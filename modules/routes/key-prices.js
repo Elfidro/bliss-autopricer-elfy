@@ -38,32 +38,45 @@ module.exports = (app) => {
       const externalLinks = config.externalLinks || { chartJsCdnUrl: 'https://cdn.jsdelivr.net/npm/chart.js' };
 
       const html = `
-        <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
-          <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
-            <h2 style="margin: 0 0 10px 0;">📈 Mann Co. Supply Crate Key Price History</h2>
-            <p style="margin: 0 0 15px 0;">Historical key price data from backpack.tf via PriceDB.io</p>
-            <button onclick="loadPriceDBData()" id="pricedbBtn" style="background: #6f42c1; color: white; border: none; padding: 12px 32px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px;">
-              🌐 Load Price History
-            </button>
+        <div style="max-width: 1560px; margin: 0 auto;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+                <span>📈</span> Mann Co. Supply Crate Key Price History
+              </h1>
+              <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+                Real-time & historical key price trajectory from backpack.tf via PriceDB.io API.
+              </p>
+            </div>
+            <div>
+              <button onclick="loadPriceDBData()" id="pricedbBtn" class="btn btn-primary" style="font-size: 0.95rem; padding: 10px 22px;">
+                <span>🌐</span> Load Price History
+              </button>
+            </div>
           </div>
           
-          <div id="loadingIndicator" style="display: none; text-align: center; padding: 40px;">
-            <div style="display: inline-block; width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #6f42c1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <p style="margin-top: 20px;">Loading...</p>
+          <div id="loadingIndicator" style="display: none; text-align: center; padding: 60px 20px;">
+            <div style="display: inline-block; width: 44px; height: 44px; border: 4px solid var(--border); border-top: 4px solid var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <p style="margin-top: 16px; font-weight: 600; color: var(--text-muted);">Fetching market history from PriceDB.io...</p>
             <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
           </div>
           
           <div id="pricedbContainer" style="display: none;">
-            <div id="pricedbStats" style="margin-bottom: 20px;"></div>
-            <div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 20px;">
-              <div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">
-                <h3 style="margin: 0;">📊 Price Trend Chart</h3>
+            <div id="pricedbStats" style="margin-bottom: 24px;"></div>
+            
+            <div class="table-container" style="margin-bottom: 24px;">
+              <div class="table-header-bar">
+                <div>
+                  <h3 style="margin: 0;"><span>📊</span> Price Trend Chart</h3>
+                  <p style="margin: 4px 0 0 0; color: var(--text-muted);">Historical Buy vs. Sell refined metal prices</p>
+                </div>
               </div>
-              <div style="padding: 20px;">
-                <canvas id="pricedbChart" width="1000" height="400"></canvas>
+              <div style="padding: 24px; position: relative; height: 420px;">
+                <canvas id="pricedbChart"></canvas>
               </div>
             </div>
-            <div id="marketInsights" style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 8px;"></div>
+
+            <div id="marketInsights" class="ui-card" style="border-left: 4px solid var(--accent); padding: 20px 24px;"></div>
           </div>
         </div>
         
@@ -71,40 +84,138 @@ module.exports = (app) => {
         <script>
           let pricedbChartInstance = null;
           async function loadPriceDBData() {
-            document.getElementById('pricedbBtn').disabled = true;
+            const btn = document.getElementById('pricedbBtn');
+            btn.disabled = true;
             document.getElementById('loadingIndicator').style.display = 'block';
-            const response = await fetch('/api/key-prices/pricedb');
-            const data = await response.json();
-            displayPriceDBData(data);
-            document.getElementById('loadingIndicator').style.display = 'none';
-            document.getElementById('pricedbContainer').style.display = 'block';
-            document.getElementById('pricedbBtn').innerText = '✅ Loaded';
-            document.getElementById('pricedbBtn').style.background = '#28a745';
+            try {
+              const response = await fetch('/api/key-prices/pricedb');
+              const data = await response.json();
+              displayPriceDBData(data);
+              document.getElementById('loadingIndicator').style.display = 'none';
+              document.getElementById('pricedbContainer').style.display = 'block';
+              btn.innerHTML = '<span>✅</span> Refresh Data';
+              btn.disabled = false;
+            } catch (err) {
+              document.getElementById('loadingIndicator').style.display = 'none';
+              btn.disabled = false;
+              alert('Failed to load PriceDB data: ' + err.message);
+            }
           }
+
           function displayPriceDBData(data) {
             data.sort((a, b) => a.time - b.time);
-            const times = data.map(p => new Date(p.time * 1000).toLocaleString());
+            const times = data.map(p => new Date(p.time * 1000).toLocaleDateString());
             const buys = data.map(p => p.buy.metal);
             const sells = data.map(p => p.sell.metal);
             const avgBuy = (buys.reduce((a,b)=>a+b,0)/buys.length).toFixed(2);
             const avgSell = (sells.reduce((a,b)=>a+b,0)/sells.length).toFixed(2);
-            document.getElementById('pricedbStats').innerHTML = '<div style="display:flex;gap:20px;flex-wrap:wrap;"><div style="flex:1;background:#e8f4fd;padding:15px;border-radius:8px;"><h4>🟢 Buy</h4><p>Avg: '+avgBuy+'</p><p>Latest: '+buys.at(-1).toFixed(2)+'</p></div><div style="flex:1;background:#fff3cd;padding:15px;border-radius:8px;"><h4>🔴 Sell</h4><p>Avg: '+avgSell+'</p><p>Latest: '+sells.at(-1).toFixed(2)+'</p></div></div>';
-            document.getElementById('marketInsights').innerHTML = '<h4>💡 Insights</h4><p>Spread: '+(sells.at(-1)-buys.at(-1)).toFixed(2)+' ref</p>';
-            if(pricedbChartInstance) pricedbChartInstance.destroy();
+            const latestBuy = buys.at(-1).toFixed(2);
+            const latestSell = sells.at(-1).toFixed(2);
+            const spread = (sells.at(-1) - buys.at(-1)).toFixed(2);
+
+            document.getElementById('pricedbStats').innerHTML = \`
+              <div class="stats-grid">
+                <div class="stat-card stat-ok">
+                  <div class="stat-top">
+                    <span class="stat-title">Latest Buy Price</span>
+                    <div class="stat-icon-wrapper">🟢</div>
+                  </div>
+                  <div class="stat-value">\${latestBuy} ref</div>
+                  <p class="stat-desc">Historical Avg: \${avgBuy} ref</p>
+                </div>
+
+                <div class="stat-card stat-danger">
+                  <div class="stat-top">
+                    <span class="stat-title">Latest Sell Price</span>
+                    <div class="stat-icon-wrapper">🔴</div>
+                  </div>
+                  <div class="stat-value">\${latestSell} ref</div>
+                  <p class="stat-desc">Historical Avg: \${avgSell} ref</p>
+                </div>
+
+                <div class="stat-card stat-warn">
+                  <div class="stat-top">
+                    <span class="stat-title">Current Spread</span>
+                    <div class="stat-icon-wrapper">⚡</div>
+                  </div>
+                  <div class="stat-value">\${spread} ref</div>
+                  <p class="stat-desc">Sell margin gap</p>
+                </div>
+
+                <div class="stat-card stat-info">
+                  <div class="stat-top">
+                    <span class="stat-title">Recorded Points</span>
+                    <div class="stat-icon-wrapper">📈</div>
+                  </div>
+                  <div class="stat-value">\${data.length}</div>
+                  <p class="stat-desc">Historical price records</p>
+                </div>
+              </div>
+            \`;
+
+            document.getElementById('marketInsights').innerHTML = \`
+              <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">
+                <span>💡</span> Key Market Analytics
+              </h4>
+              <p style="margin: 0; color: var(--text-muted); font-size: 0.92rem;">
+                Current key price spread is <strong>\${spread} ref</strong>. The key market shows a 
+                \${parseFloat(latestBuy) >= parseFloat(avgBuy) ? 'steady or rising' : 'softening'} valuation compared to the historical average of \${avgBuy} ref.
+              </p>
+            \`;
+
+            if (pricedbChartInstance) pricedbChartInstance.destroy();
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+            const textColor = isDark ? '#94a3b8' : '#64748b';
+
             pricedbChartInstance = new Chart(document.getElementById('pricedbChart'), {
               type: 'line',
               data: {
                 labels: times,
-                datasets: [{label:'Buy',data:buys,borderColor:'#28a745',tension:0.3},{label:'Sell',data:sells,borderColor:'#dc3545',tension:0.3}]
+                datasets: [
+                  {
+                    label: 'Buy Price (Ref)',
+                    data: buys,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 2
+                  },
+                  {
+                    label: 'Sell Price (Ref)',
+                    data: sells,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    fill: false,
+                    tension: 0.3,
+                    borderWidth: 2,
+                    pointRadius: 2
+                  }
+                ]
               },
-              options: {responsive:true,plugins:{legend:{position:'top'}}}
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    position: 'top',
+                    labels: { color: textColor, font: { family: "'Plus Jakarta Sans', sans-serif" } }
+                  }
+                },
+                scales: {
+                  x: { grid: { color: gridColor }, ticks: { color: textColor } },
+                  y: { grid: { color: gridColor }, ticks: { color: textColor } }
+                }
+              }
             });
           }
         </script>
       `;
       res.send(renderPage('Key Price History', html));
     } catch (err) {
-      res.status(500).send(renderPage('Error', '<p>Error: ' + err.message + '</p>'));
+      res.status(500).send(renderPage('Error', '<div class="flash flash-error">Error: ' + err.message + '</div>'));
     }
   });
 };

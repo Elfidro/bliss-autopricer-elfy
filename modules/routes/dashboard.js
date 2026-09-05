@@ -13,12 +13,9 @@ module.exports = function (app, configManager) {
       let trades = [];
       try {
         const pollData = loadJson(pollDataPath);
-        // polldata.json contains { offerData: {...} } - extract trades from offerData
         if (pollData && pollData.offerData) {
-          // Filter for only accepted trades (same as P&L page)
           const allTrades = Object.values(pollData.offerData);
           
-          // Get bot owner Steam IDs for exclusion from profit calculations
           let mainConfig = {};
           try {
             mainConfig = getBaseConfigManager().getConfig();
@@ -28,7 +25,6 @@ module.exports = function (app, configManager) {
           
           const botOwnerSteamIDs = new Set(mainConfig.botOwnerSteamIDs || []);
           
-          // Filter: only accepted trades, exclude bot owner trades
           trades = allTrades.filter((t) => {
             if (!t.isAccepted) return false;
             if (t.partner && botOwnerSteamIDs.has(t.partner)) return false;
@@ -36,7 +32,6 @@ module.exports = function (app, configManager) {
           });
         }
       } catch (error) {
-        // Silent fail - dashboard works without trade data
         console.log('Could not load polldata.json:', error.message || error);
       }
 
@@ -48,7 +43,6 @@ module.exports = function (app, configManager) {
       const trades24h = Array.isArray(trades) ? trades.filter((trade) => trade.time * 1000 > oneDayAgo) : [];
       const trades7d = Array.isArray(trades) ? trades.filter((trade) => trade.time * 1000 > oneWeekAgo) : [];
 
-      // Calculate profit/loss for recent trades
       let totalProfit24h = 0;
       let totalProfit7d = 0;
       let totalProfitAll = 0;
@@ -66,7 +60,7 @@ module.exports = function (app, configManager) {
         
         let ourTotalMetal, theirTotalMetal;
         if (valueOur.total !== undefined && valueTheir.total !== undefined) {
-          ourTotalMetal = valueOur.total / 9; // Convert scrap to refined
+          ourTotalMetal = valueOur.total / 9;
           theirTotalMetal = valueTheir.total / 9;
         } else {
           ourTotalMetal = (valueOur.keys || 0) * keyPrice + (valueOur.metal || 0);
@@ -138,185 +132,210 @@ module.exports = function (app, configManager) {
         .sort(([, a], [, b]) => b - a)
         .slice(0, 5);
 
-      // Build the dashboard HTML
-      let html = '<div style="max-width: 1400px; margin: 0 auto; padding: 20px;">';
+      // Build modern dashboard HTML
+      let html = '<div style="max-width: 1560px; margin: 0 auto;">';
 
-      // Header
-      html +=
-        '<div style="background: linear-gradient(135deg, #007cba 0%, #005a8b 100%); color: white; padding: 30px; border-radius: 12px; margin-bottom: 30px; text-align: center;">';
-      html += '<h1 style="margin: 0 0 10px 0; font-size: 2.5em;">🚀 Trading Dashboard</h1>';
-      html +=
-        '<p style="margin: 0; font-size: 1.2em; opacity: 0.9;">Real-time overview of your trading bot performance</p>';
-      html += '</div>';
+      // Page Header
+      html += `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+              <span>🚀</span> Trading Dashboard
+            </h1>
+            <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+              Real-time telemetry, automated trade volume, and bot operational health overview.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <a href="/pnl" class="btn btn-primary"><span>📈</span> View Detailed P&L</a>
+            <a href="/trades" class="btn btn-secondary"><span>📊</span> Trade History</a>
+          </div>
+        </div>
+      `;
 
-      // Key Metrics Row
-      html +=
-        '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px;">';
-
-      // 24h Profit Card
-      const profit24hColor = totalProfit24h >= 0 ? '#28a745' : '#dc3545';
+      // Key Metrics Row (Modern Stats Grid)
+      const profit24hCardClass = totalProfit24h >= 0 ? 'stat-ok' : 'stat-danger';
       const profit24hIcon = totalProfit24h >= 0 ? '📈' : '📉';
-      html += `<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-        <div style="font-size: 2.5em; margin-bottom: 10px;">${profit24hIcon}</div>
-        <h3 style="margin: 0 0 5px 0; color: #333;">24h Profit/Loss</h3>
-        <div style="font-size: 2em; font-weight: bold; color: ${profit24hColor};">${totalProfit24h.toFixed(2)} ref</div>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Last 24 hours</p>
-      </div>`;
 
-      // 7d Profit Card
-      const profit7dColor = totalProfit7d >= 0 ? '#28a745' : '#dc3545';
+      const profit7dCardClass = totalProfit7d >= 0 ? 'stat-ok' : 'stat-danger';
       const profit7dIcon = totalProfit7d >= 0 ? '📊' : '📉';
-      html += `<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-        <div style="font-size: 2.5em; margin-bottom: 10px;">${profit7dIcon}</div>
-        <h3 style="margin: 0 0 5px 0; color: #333;">7-Day Profit/Loss</h3>
-        <div style="font-size: 2em; font-weight: bold; color: ${profit7dColor};">${totalProfit7d.toFixed(2)} ref</div>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Last 7 days</p>
-      </div>`;
 
-      // Total Trades Card
-      html += `<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-        <div style="font-size: 2.5em; margin-bottom: 10px;">🔄</div>
-        <h3 style="margin: 0 0 5px 0; color: #333;">24h Trades</h3>
-        <div style="font-size: 2em; font-weight: bold; color: #007cba;">${trades24h.length}</div>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Total transactions</p>
-      </div>`;
+      const healthCardClass = keyPriceHealth === 'Healthy' ? 'stat-ok' : keyPriceHealth === 'Warning' ? 'stat-warn' : 'stat-danger';
+      const healthIcon = keyPriceHealth === 'Healthy' ? '✅' : keyPriceHealth === 'Warning' ? '⚠️' : '❌';
 
-      // System Health Card
-      const healthColor =
-        keyPriceHealth === 'Healthy'
-          ? '#28a745'
-          : keyPriceHealth === 'Warning'
-            ? '#ffc107'
-            : '#dc3545';
-      const healthIcon =
-        keyPriceHealth === 'Healthy' ? '✅' : keyPriceHealth === 'Warning' ? '⚠️' : '❌';
-      html += `<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-        <div style="font-size: 2.5em; margin-bottom: 10px;">${healthIcon}</div>
-        <h3 style="margin: 0 0 5px 0; color: #333;">System Health</h3>
-        <div style="font-size: 1.5em; font-weight: bold; color: ${healthColor};">${keyPriceHealth}</div>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Price data status</p>
-      </div>`;
-
-      html += '</div>';
-
-      // Charts and Details Row
-      html +=
-        '<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 30px; margin-bottom: 30px;">';
-
-      // Profit Trend Chart (Simple)
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">';
-      html += '<h3 style="margin: 0 0 20px 0; color: #333;">📈 Profit Trend Overview</h3>';
-
-      // Simple profit breakdown
-      const profitAllColor = totalProfitAll >= 0 ? '#28a745' : '#dc3545';
-      html +=
-        '<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; text-align: center;">';
-      html += `<div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-        <div style="font-size: 1.1em; font-weight: bold; color: #333;">All Time</div>
-        <div style="font-size: 1.8em; font-weight: bold; color: ${profitAllColor}; margin-top: 5px;">${totalProfitAll.toFixed(2)} ref</div>
-      </div>`;
-      html += `<div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-        <div style="font-size: 1.1em; font-weight: bold; color: #333;">7 Days</div>
-        <div style="font-size: 1.8em; font-weight: bold; color: ${profit7dColor}; margin-top: 5px;">${totalProfit7d.toFixed(2)} ref</div>
-      </div>`;
-      html += `<div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-        <div style="font-size: 1.1em; font-weight: bold; color: #333;">24 Hours</div>
-        <div style="font-size: 1.8em; font-weight: bold; color: ${profit24hColor}; margin-top: 5px;">${totalProfit24h.toFixed(2)} ref</div>
-      </div>`;
-      html += '</div>';
-
-      html +=
-        '<div style="margin-top: 20px; padding: 15px; background: #e8f4fd; border-radius: 8px;">';
-      html += '<p style="margin: 0; color: #007cba; font-weight: bold;">💡 Quick Stats:</p>';
-      html +=
-        '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-size: 0.9em;">';
-      html += `<div>Total Trades: <strong>${trades.length}</strong></div>`;
-      html += `<div>Avg per Trade: <strong>${trades.length > 0 ? (totalProfitAll / trades.length).toFixed(2) : '0.00'} ref</strong></div>`;
-      html += `<div>7d Trade Volume: <strong>${trades7d.length}</strong></div>`;
-      html += `<div>Key Data Updated: <strong>${lastKeyUpdate}</strong></div>`;
-      html += '</div>';
-      html += '</div>';
-
-      html += '</div>';
-
-      // Top Items Panel
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">';
-      html += '<h3 style="margin: 0 0 20px 0; color: #333;">🔥 Top Items (24h)</h3>';
-
-      if (topItems.length === 0) {
-        html +=
-          '<div style="text-align: center; color: #666; padding: 20px;">No trades in the last 24 hours</div>';
-      } else {
-        topItems.forEach(([itemName, count], index) => {
-          const rank = index + 1;
-          const rankEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🏅';
-          html += `<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #eee;">
-            <div style="display: flex; align-items: center;">
-              <span style="font-size: 1.2em; margin-right: 10px;">${rankEmoji}</span>
-              <span style="font-weight: bold;">${itemName}</span>
+      html += `
+        <div class="stats-grid">
+          <div class="stat-card ${profit24hCardClass}">
+            <div class="stat-top">
+              <span class="stat-title">24h Profit / Loss</span>
+              <div class="stat-icon-wrapper">${profit24hIcon}</div>
             </div>
-            <span style="background: #007cba; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.9em;">${count} trades</span>
-          </div>`;
-        });
-      }
+            <div class="stat-value">${totalProfit24h >= 0 ? '+' : ''}${totalProfit24h.toFixed(2)} ref</div>
+            <p class="stat-desc">Calculated across last 24 hours</p>
+          </div>
 
-      html += '</div>';
-      html += '</div>';
+          <div class="stat-card ${profit7dCardClass}">
+            <div class="stat-top">
+              <span class="stat-title">7-Day Profit / Loss</span>
+              <div class="stat-icon-wrapper">${profit7dIcon}</div>
+            </div>
+            <div class="stat-value">${totalProfit7d >= 0 ? '+' : ''}${totalProfit7d.toFixed(2)} ref</div>
+            <p class="stat-desc">Cumulative rolling 7 days</p>
+          </div>
 
-      // Quick Actions
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 12px; padding: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">';
-      html += '<h3 style="margin: 0 0 20px 0; color: #333;">⚡ Quick Actions</h3>';
-      html +=
-        '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+          <div class="stat-card stat-info">
+            <div class="stat-top">
+              <span class="stat-title">24h Transactions</span>
+              <div class="stat-icon-wrapper">🔄</div>
+            </div>
+            <div class="stat-value">${trades24h.length}</div>
+            <p class="stat-desc">Accepted customer trades</p>
+          </div>
 
-      html +=
-        '<a href="/pnl" style="background: #28a745; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">💰</div>';
-      html += '<div style="font-weight: bold;">P&L Analysis</div>';
-      html += '</a>';
+          <div class="stat-card ${healthCardClass}">
+            <div class="stat-top">
+              <span class="stat-title">System Health</span>
+              <div class="stat-icon-wrapper">${healthIcon}</div>
+            </div>
+            <div class="stat-value">${keyPriceHealth}</div>
+            <p class="stat-desc">Key feed data status</p>
+          </div>
+        </div>
+      `;
 
-      html +=
-        '<a href="/trades" style="background: #007cba; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">📊</div>';
-      html += '<div style="font-weight: bold;">Trade History</div>';
-      html += '</a>';
+      // Details & Top Items Row
+      html += `
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
+          <!-- Profit Breakdown Card -->
+          <div class="ui-card" style="margin-bottom: 0;">
+            <div class="ui-card-header">
+              <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                <span>📈</span> Profit Trajectory Breakdown
+              </h3>
+              <span class="badge badge-info">1 Key ≈ ${keyPrice.toFixed(2)} Ref</span>
+            </div>
 
-      html +=
-        '<a href="/key-prices" style="background: #fd7e14; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">🔑</div>';
-      html += '<div style="font-weight: bold;">Key Prices</div>';
-      html += '</a>';
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px;">
+              <div style="padding: 16px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); text-align: center;">
+                <div style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">All Time</div>
+                <div style="font-size: 1.5rem; font-weight: 800; color: ${totalProfitAll >= 0 ? 'var(--ok-text)' : 'var(--danger-text)'};">
+                  ${totalProfitAll >= 0 ? '+' : ''}${totalProfitAll.toFixed(2)} ref
+                </div>
+              </div>
 
-      html +=
-        '<a href="/settings" style="background: #6c757d; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">⚙️</div>';
-      html += '<div style="font-weight: bold;">Settings</div>';
-      html += '</a>';
+              <div style="padding: 16px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); text-align: center;">
+                <div style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Past 7 Days</div>
+                <div style="font-size: 1.5rem; font-weight: 800; color: ${totalProfit7d >= 0 ? 'var(--ok-text)' : 'var(--danger-text)'};">
+                  ${totalProfit7d >= 0 ? '+' : ''}${totalProfit7d.toFixed(2)} ref
+                </div>
+              </div>
 
-      html +=
-        '<a href="/bot-config" style="background: #17a2b8; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">🤖</div>';
-      html += '<div style="font-weight: bold;">Bot Config</div>';
-      html += '</a>';
+              <div style="padding: 16px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); text-align: center;">
+                <div style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">Past 24 Hours</div>
+                <div style="font-size: 1.5rem; font-weight: 800; color: ${totalProfit24h >= 0 ? 'var(--ok-text)' : 'var(--danger-text)'};">
+                  ${totalProfit24h >= 0 ? '+' : ''}${totalProfit24h.toFixed(2)} ref
+                </div>
+              </div>
+            </div>
 
-      html +=
-        '<a href="/bounds" style="background: #dc3545; color: white; padding: 15px; border-radius: 8px; text-decoration: none; text-align: center; transition: all 0.2s;">';
-      html += '<div style="font-size: 1.5em; margin-bottom: 5px;">⚖️</div>';
-      html += '<div style="font-weight: bold;">Price Bounds</div>';
-      html += '</a>';
+            <div style="padding: 16px 20px; background: var(--accent-subtle); border: 1px solid var(--accent-glow); border-radius: var(--radius);">
+              <div style="font-size: 0.88rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                <span>💡</span> Operational Metrics Summary
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.88rem;">
+                <div>Total Lifetime Trades: <strong style="color: var(--text);">${trades.length}</strong></div>
+                <div>Avg Profit per Trade: <strong style="color: var(--text);">${trades.length > 0 ? (totalProfitAll / trades.length).toFixed(2) : '0.00'} ref</strong></div>
+                <div>7-Day Volume: <strong style="color: var(--text);">${trades7d.length} trades</strong></div>
+                <div>Key Price Last Sync: <strong style="color: var(--text);">${lastKeyUpdate}</strong></div>
+              </div>
+            </div>
+          </div>
 
-      html += '</div>';
-      html += '</div>';
+          <!-- Top Traded Items Card -->
+          <div class="ui-card" style="margin-bottom: 0;">
+            <div class="ui-card-header">
+              <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+                <span>🔥</span> Top Items (24h)
+              </h3>
+            </div>
+
+            <div>
+              ${
+                topItems.length === 0
+                  ? '<div style="text-align: center; color: var(--text-dim); padding: 36px 12px; font-size: 0.9rem;">No trades recorded in the last 24 hours</div>'
+                  : topItems.map(([itemName, count], index) => {
+                      const rank = index + 1;
+                      const rankEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🏅';
+                      return `
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border);">
+                          <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px;">
+                            <span style="font-size: 1.1rem; flex-shrink: 0;">${rankEmoji}</span>
+                            <span style="font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis;">${itemName}</span>
+                          </div>
+                          <span class="badge badge-info">${count} trade${count === 1 ? '' : 's'}</span>
+                        </div>
+                      `;
+                    }).join('')
+              }
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Quick Actions Panel
+      html += `
+        <div class="ui-card">
+          <div class="ui-card-header">
+            <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
+              <span>⚡</span> Quick Navigation & Controls
+            </h3>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px;">
+            <a href="/pnl" class="stat-card stat-ok" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">💰</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">P&L Analysis</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">Inspect profit graphs & trade details</p>
+            </a>
+
+            <a href="/trades" class="stat-card stat-info" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">📊</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">Trade History</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">View all incoming/outgoing offers</p>
+            </a>
+
+            <a href="/key-prices" class="stat-card stat-warn" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">🔑</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">Key Prices</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">PriceDB.io history & market charts</p>
+            </a>
+
+            <a href="/bounds" class="stat-card stat-danger" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">⚖️</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">Price Bounds</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">Configure min/max buy & sell limits</p>
+            </a>
+
+            <a href="/bot-config" class="stat-card stat-info" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">🤖</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">Bot Config</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">Manage tf2autobot instances</p>
+            </a>
+
+            <a href="/settings" class="stat-card" style="text-decoration: none; cursor: pointer; padding: 18px;">
+              <div style="font-size: 1.8rem; margin-bottom: 8px;">⚙️</div>
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text);">Settings</div>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">API tokens, algorithms & thresholds</p>
+            </a>
+          </div>
+        </div>
+      `;
 
       html += '</div>';
 
       res.send(renderPage('Dashboard', html));
     } catch (error) {
       console.error('Dashboard error:', error);
-      res.status(500).send(renderPage('Error', '<div>Error loading dashboard</div>'));
+      res.status(500).send(renderPage('Error', '<div class="flash flash-error">Error loading dashboard: ' + error.message + '</div>'));
     }
   });
 };

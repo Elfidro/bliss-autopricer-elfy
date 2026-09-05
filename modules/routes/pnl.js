@@ -307,129 +307,144 @@ module.exports = function (app, config, configManager) {
         console.warn('Could not load pricelist for item names:', error.message);
       }
 
-      let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
+      let html = '<div style="max-width: 1560px; margin: 0 auto;">';
 
       // Header
-      html +=
-        '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
-      html += '<h2>💰 Profit & Loss Dashboard</h2>';
-      html +=
-        '<p>Track your trading performance with detailed profit analysis and trend visualization.</p>';
-      html += '</div>';
-
-      // Summary Statistics
-      html += '<div style="display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap;">';
-
-      // Total Profit Card
-      const profitColor = totalProfit >= 0 ? '#28a745' : '#dc3545';
-      const profitIcon = totalProfit >= 0 ? '📈' : '📉';
-      html +=
-        '<div style="flex: 1; min-width: 250px; background: #e8f4fd; padding: 15px; border-radius: 8px;">';
-      html += `<h3 style="color: ${profitColor}; margin-top: 0;">${profitIcon} Total Net Profit</h3>`;
-      html += `<p style="font-size: 24px; font-weight: bold; color: ${profitColor}; margin: 10px 0;">${totalProfit >= 0 ? '+' : ''}${totalProfit.toFixed(2)} Refined</p>`;
-      html += `<p><strong>Trades Analyzed:</strong> ${filteredHistory.length}</p>`;
-      if (botOwnerSteamIDs.size > 0) {
-        const excludedCount = history.length - filteredHistory.length;
-        html += `<p><strong>Owner Trades Excluded:</strong> ${excludedCount}</p>`;
-      }
-      html += '</div>';
-
-      // Key Price Card
-      html +=
-        '<div style="flex: 1; min-width: 250px; background: #fff3cd; padding: 15px; border-radius: 8px;">';
-      html += '<h3 style="margin-top: 0;">🔑 Key Price Used</h3>';
-      html += `<p style="font-size: 18px; font-weight: bold; margin: 10px 0;">${keyPrice ? keyPrice.toFixed(2) : 'N/A'} Refined</p>`;
-      html += '<p>Used for profit calculations</p>';
-      html += '</div>';
-
-      // Summary stats
-      const profitableItems = allItems.filter(([, data]) => data.profit > 0).length;
-      const lossItems = allItems.filter(([, data]) => data.profit < 0).length;
-      const totalItemsTraded = allItems.length;
-
       html += `
-      <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 150px; background: #e8f4fd; padding: 15px; border-radius: 8px; text-align: center;">
-          <h4>Items Traded</h4>
-          <p style="font-size: 20px; font-weight: bold;">${totalItemsTraded}</p>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+              <span>📈</span> Profit & Loss Analytics
+            </h1>
+            <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+              FIFO-matched item cost basis accounting, margin analysis, and cumulative profit trajectory.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <a href="/trades" class="btn btn-secondary"><span>📊</span> Trade History</a>
+            <a href="/key-prices" class="btn btn-secondary"><span>🔑</span> Key Prices</a>
+          </div>
         </div>
-        <div style="flex: 1; min-width: 150px; background: #d4edda; padding: 15px; border-radius: 8px; text-align: center;">
-          <h4>Profitable Items</h4>
-          <p style="font-size: 20px; font-weight: bold; color: #28a745;">${profitableItems}</p>
-        </div>
-        <div style="flex: 1; min-width: 150px; background: #f8d7da; padding: 15px; border-radius: 8px; text-align: center;">
-          <h4>Loss Items</h4>
-          <p style="font-size: 20px; font-weight: bold; color: #dc3545;">${lossItems}</p>
-        </div>
-      </div>
       `;
 
-      html += '</div>';
+      // Summary Statistics Grid
+      const profitableItems = allItems.filter(([, data]) => data.profit > 0).length;
+      const lossItems = allItems.filter(([, data]) => data.profit < 0).length;
+      const profitCardClass = totalProfit >= 0 ? 'stat-ok' : 'stat-danger';
+      const profitIcon = totalProfit >= 0 ? '📈' : '📉';
+
+      html += `
+        <div class="stats-grid">
+          <div class="stat-card ${profitCardClass}">
+            <div class="stat-top">
+              <span class="stat-title">Net Realized Profit</span>
+              <div class="stat-icon-wrapper">${profitIcon}</div>
+            </div>
+            <div class="stat-value">${totalProfit >= 0 ? '+' : ''}${totalProfit.toFixed(2)} ref</div>
+            <p class="stat-desc">From ${filteredHistory.length} analyzed trades</p>
+          </div>
+
+          <div class="stat-card stat-warn">
+            <div class="stat-top">
+              <span class="stat-title">Key Valuation Basis</span>
+              <div class="stat-icon-wrapper">🔑</div>
+            </div>
+            <div class="stat-value">${keyPrice ? keyPrice.toFixed(2) : 'N/A'} ref</div>
+            <p class="stat-desc">Current key conversion factor</p>
+          </div>
+
+          <div class="stat-card stat-ok">
+            <div class="stat-top">
+              <span class="stat-title">Profitable Items</span>
+              <div class="stat-icon-wrapper">🟢</div>
+            </div>
+            <div class="stat-value">${profitableItems}</div>
+            <p class="stat-desc">Items with positive net margin</p>
+          </div>
+
+          <div class="stat-card ${lossItems > 0 ? 'stat-danger' : 'stat-ok'}">
+            <div class="stat-top">
+              <span class="stat-title">Loss Items</span>
+              <div class="stat-icon-wrapper">🔴</div>
+            </div>
+            <div class="stat-value">${lossItems}</div>
+            <p class="stat-desc">Items sold under acquisition cost</p>
+          </div>
+        </div>
+      `;
 
       // Chart Container
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 20px;">';
-      html += '<div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">';
-      html += '<h3 style="margin: 0;">📊 Cumulative Profit Over Time</h3>';
-      html +=
-        '<p style="margin: 5px 0 0 0; color: #666;">Track your profit growth across all completed trades</p>';
-      html += '</div>';
-      html +=
-        '<div class="chart-fullscreen" style="position: relative; height: 400px; padding: 20px;">';
-      html += '<canvas id="profitOverTime" style="width: 100%; height: 100%;"></canvas>';
-      html += '</div>';
-      html += '</div>';
+      html += `
+        <div class="table-container" style="margin-bottom: 24px;">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="margin: 0;"><span>📊</span> Cumulative Realized Profit Growth</h3>
+              <p style="margin: 4px 0 0 0; color: var(--text-muted);">Step-by-step net earnings across chronological customer trades</p>
+            </div>
+          </div>
+          <div style="padding: 24px; position: relative; height: 380px;">
+            <canvas id="profitOverTime" style="width: 100%; height: 100%;"></canvas>
+          </div>
+        </div>
+      `;
 
-      // All Items Table - Updated to show detailed item analysis
+      // All Items Table
       if (allItems.length > 0) {
-        html +=
-          '<div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">';
-        html += '<div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd;">';
-        html += '<h3 style="margin: 0;">📊 Complete Item Analysis</h3>';
-        html +=
-          '<p style="margin: 5px 0 0 0; color: #666;">Detailed profit/loss breakdown for all traded items</p>';
-        html += '</div>';
-        html += '<div style="padding: 20px; overflow-x: auto;">';
-        html += '<table style="width: 100%; border-collapse: collapse; min-width: 800px;">';
-        html += '<thead>';
-        html += '<tr style="background: #f8f9fa;">';
-        html +=
-          '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Item Name</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Net Qty</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Bought</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Sold</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Profit/Loss</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Avg Buy Price</th>';
-        html +=
-          '<th style="padding: 12px; text-align: center; border-bottom: 1px solid #ddd;">Avg Sell Price</th>';
-        html += '</tr>';
-        html += '</thead>';
-        html += '<tbody>';
+        html += `
+          <div class="table-container">
+            <div class="table-header-bar">
+              <div>
+                <h3 style="margin: 0;"><span>📦</span> Complete Item Performance Analysis</h3>
+                <p style="margin: 4px 0 0 0; color: var(--text-muted);">FIFO cost accounting breakdown across all traded item SKUs</p>
+              </div>
+              <span class="badge badge-info">${allItems.length} unique items</span>
+            </div>
+            <div style="overflow-x: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width: 28%;">Item Name / SKU</th>
+                    <th style="width: 10%; text-align: center;">Net Qty</th>
+                    <th style="width: 10%; text-align: center;">Total Bought</th>
+                    <th style="width: 10%; text-align: center;">Total Sold</th>
+                    <th style="width: 14%; text-align: center;">Net Profit</th>
+                    <th style="width: 14%; text-align: center;">Avg Buy (Ref)</th>
+                    <th style="width: 14%; text-align: center;">Avg Sell (Ref)</th>
+                  </tr>
+                </thead>
+                <tbody>
+        `;
 
-        allItems.forEach(([sku, data], index) => {
+        allItems.forEach(([sku, data]) => {
           const itemName = (pricelist[sku] && pricelist[sku].name) || sku;
-          const rowStyle = index % 2 === 0 ? 'background: #f9f9f9;' : '';
-          const profitColor = data.profit >= 0 ? '#28a745' : '#dc3545';
-          html += `<tr style="${rowStyle}">`;
-          html += `<td style="padding: 12px; border-bottom: 1px solid #eee; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${itemName}">${itemName}</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${data.qty}</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${data.totalBought || 0}</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${data.totalSold || 0}</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee; color: ${profitColor}; font-weight: bold;">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(2)} Ref</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${(data.avgBuyPrice || 0).toFixed(3)} Ref</td>`;
-          html += `<td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">${(data.avgSellPrice || 0).toFixed(3)} Ref</td>`;
+          html += `<tr>`;
+          html += `<td style="font-weight: 600;">
+                    <div style="margin-bottom: 2px;">${itemName}</div>
+                    <code class="sku-badge">${sku}</code>
+                   </td>`;
+          html += `<td style="text-align: center; font-family: var(--font-mono); font-weight: 600;">${data.qty}</td>`;
+          html += `<td style="text-align: center; font-family: var(--font-mono);">${data.totalBought || 0}</td>`;
+          html += `<td style="text-align: center; font-family: var(--font-mono);">${data.totalSold || 0}</td>`;
+          
+          if (data.profit > 0) {
+            html += `<td style="text-align: center;"><span class="price-tag price-buy">+${data.profit.toFixed(2)} Ref</span></td>`;
+          } else if (data.profit < 0) {
+            html += `<td style="text-align: center;"><span class="price-tag price-sell">${data.profit.toFixed(2)} Ref</span></td>`;
+          } else {
+            html += `<td style="text-align: center;"><span class="badge badge-muted">0.00 Ref</span></td>`;
+          }
+
+          html += `<td style="text-align: center; font-family: var(--font-mono); font-size: 0.88rem;">${(data.avgBuyPrice || 0).toFixed(2)}</td>`;
+          html += `<td style="text-align: center; font-family: var(--font-mono); font-size: 0.88rem;">${(data.avgSellPrice || 0).toFixed(2)}</td>`;
           html += '</tr>';
         });
 
-        html += '</tbody>';
-        html += '</table>';
-        html += '</div>';
-        html += '</div>';
+        html += `
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
       }
 
       html += '</div>';
@@ -442,6 +457,9 @@ module.exports = function (app, config, configManager) {
 
         <script>
           const ctxProfit = document.getElementById('profitOverTime').getContext('2d');
+          const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+          const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+          const textColor = isDark ? '#94a3b8' : '#64748b';
           new Chart(ctxProfit, {
             type: 'line',
             data: {
@@ -468,16 +486,22 @@ module.exports = function (app, config, configManager) {
                 x: {
                   type: 'time',
                   time: { unit: 'day' },
+                  grid: { color: gridColor },
+                  ticks: { color: textColor },
                   title: { 
                     display: true, 
                     text: 'Date',
+                    color: textColor,
                     font: { weight: 'bold' }
                   }
                 },
                 y: {
+                  grid: { color: gridColor },
+                  ticks: { color: textColor },
                   title: { 
                     display: true, 
                     text: 'Cumulative Profit (Refined Metal)',
+                    color: textColor,
                     font: { weight: 'bold' }
                   }
                 }
@@ -485,11 +509,13 @@ module.exports = function (app, config, configManager) {
               plugins: {
                 legend: { 
                   display: true, 
-                  position: 'top' 
+                  position: 'top',
+                  labels: { color: textColor }
                 },
                 title: {
                   display: true,
                   text: 'Profit Growth Over Time',
+                  color: textColor,
                   font: {
                     size: 16,
                     weight: 'bold'

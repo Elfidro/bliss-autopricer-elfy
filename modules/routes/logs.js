@@ -26,86 +26,78 @@ module.exports = (app) => {
     const logPath = path.join(pm2LogDir, file);
 
     fs.readFile(logPath, 'utf8', (err, data) => {
-      let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
+      let html = '<div style="max-width: 1560px; margin: 0 auto;">';
 
       // Header
-      html +=
-        '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
-      html += '<h2>📄 Application Logs</h2>';
-      html +=
-        '<p>Monitor real-time application logs to debug issues and track system behavior.</p>';
-      html += '</div>';
+      html += `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+              <span>📝</span> Application Runtime Logs
+            </h1>
+            <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+              Inspect real-time standard output and error telemetry streams emitted by PM2 and the autopricer engine.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            ${LOG_FILES.map((f) => {
+              const isActive = f === file;
+              const icon = f.includes('error') ? '🔴' : '📄';
+              return `<a href="/logs?file=${f}" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}"><span>${icon}</span> ${f}</a>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
 
-      // Log File Selection
-      html +=
-        '<div style="background: #e8f4fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
-      html += '<h3>📂 Available Log Files</h3>';
-      html += '<div style="display: flex; gap: 10px; flex-wrap: wrap;">';
-
-      LOG_FILES.forEach((f) => {
-        const isActive = f === file;
-        const buttonStyle = isActive
-          ? 'background: #007cba; color: white;'
-          : 'background: #6c757d; color: white;';
-        const icon = f.includes('error') ? '🔴' : '📄';
-
-        html += `<a href="/logs?file=${f}" style="${buttonStyle} padding: 10px 15px; text-decoration: none; border-radius: 4px; font-weight: ${isActive ? 'bold' : 'normal'};">${icon} ${f}</a>`;
-      });
-
-      html += '</div>';
-      html += '</div>';
-
-      // Log Content
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">';
-      html +=
-        '<div style="background: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center;">';
-      html += `<h3 style="margin: 0;">📋 ${file}</h3>`;
-      html +=
-        '<small style="color: #666;">Auto-refreshes every 8 minutes | Last 15KB shown</small>';
-      html += '</div>';
+      // Log Content Box
+      html += `
+        <div class="table-container" style="margin-bottom: 24px;">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="margin: 0;"><span>📋</span> ${file}</h3>
+              <p style="margin: 4px 0 0 0; color: var(--text-muted);">Showing recent buffer tail (15KB) • Auto-refreshes every 8 minutes</p>
+            </div>
+            <button onclick="window.location.reload()" class="btn btn-secondary" style="font-size: 0.84rem; padding: 6px 14px;">
+              <span>🔄</span> Refresh Now
+            </button>
+          </div>
+      `;
 
       if (err) {
-        html += '<div style="padding: 20px;">';
-        html +=
-          '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; text-align: center;">';
-        html += '<h4>⚠️ Unable to Read Log File</h4>';
-        html += `<p><strong>File:</strong> ${file}</p>`;
-        html += `<p><strong>Path:</strong> <code>${logPath}</code></p>`;
-        html += `<p><strong>Error:</strong> ${err.message}</p>`;
-        html += '<p>This could indicate:</p>';
-        html += '<ul style="text-align: left; display: inline-block;">';
-        html += '<li>The application is not running</li>';
-        html += '<li>Log files have not been created yet</li>';
-        html += '<li>Insufficient permissions to read log files</li>';
-        html += '<li>PM2 is not managing the application</li>';
-        html += '</ul>';
-        html += '</div>';
-        html += '</div>';
+        html += `
+          <div style="padding: 36px 24px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 12px;">⚠️</div>
+            <h4 style="margin: 0 0 8px 0; font-size: 1.1rem; color: var(--danger-text);">Unable to Read Log File</h4>
+            <p style="color: var(--text-muted); margin-bottom: 16px;"><code>${logPath}</code></p>
+            <div style="font-size: 0.88rem; color: var(--text-dim); max-width: 500px; margin: 0 auto;">
+              Error: ${err.message}. The log file might not have been generated yet or the PM2 process is currently idle.
+            </div>
+          </div>
+        `;
       } else {
-        html += '<div style="padding: 0;">';
-        html +=
-          '<pre id="logbox" style="background: #1e1e1e; color: #00ff00; padding: 20px; margin: 0; overflow-x: auto; max-height: 70vh; font-family: \'Courier New\', monospace; font-size: 14px; line-height: 1.4; white-space: pre-wrap;">';
-        // Show last 15KB to avoid overwhelming the browser
         const logContent = data.slice(-15000);
-        html += logContent.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        html += '</pre>';
-        html += '</div>';
+        const escapedContent = logContent.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html += `
+          <div style="padding: 0;">
+            <pre id="logbox" style="margin: 0; border: none !important; border-radius: 0 !important; max-height: 72vh; line-height: 1.45; white-space: pre-wrap;">${escapedContent}</pre>
+          </div>
+        `;
       }
 
-      html += '</div>';
+      html += `</div>`;
 
-      // Auto-refresh info
-      html +=
-        '<div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 8px; margin-top: 20px;">';
-      html += '<h4>🔄 Auto-Refresh Information</h4>';
-      html +=
-        '<p>This page automatically refreshes every 8 minutes to show the latest log entries.</p>';
-      html +=
-        '<p>For real-time monitoring, consider using: <code>tail -f ~/.pm2/logs/' +
-        file +
-        '</code></p>';
-      html += '</div>';
+      // Info Card
+      html += `
+        <div class="ui-card" style="border-left: 4px solid var(--accent); padding: 18px 24px;">
+          <h4 style="margin: 0 0 8px 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+            <span>💡</span> Real-Time CLI Monitoring
+          </h4>
+          <p style="margin: 0; font-size: 0.9rem; color: var(--text-muted);">
+            For real-time streaming logs with zero delay, connect to your terminal or host shell and run: 
+            <code style="margin-left: 6px;">pm2 logs ${file.replace(/-(out|error).log$/, '')}${file.includes('error') ? ' --err' : ' --out'}</code>
+          </p>
+        </div>
+      `;
 
       html += '</div>';
 

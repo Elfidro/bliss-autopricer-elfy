@@ -10,128 +10,154 @@ module.exports = function (app, configManager) {
     const allBots = configManager.getAllBots();
     const selectedBot = configManager.getSelectedBot();
 
-    let html = '<div style="max-width: 1200px; margin: 0 auto; padding: 20px;">';
+    let html = '<div style="max-width: 1560px; margin: 0 auto;">';
 
     // Header
-    html +=
-      '<div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">';
-    html += '<h2>🤖 Bot Configuration Manager</h2>';
-    html += '<p>Manage your tf2autobot configurations and switch between multiple bots.</p>';
-    html += '</div>';
+    html += `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h1 style="font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 12px;">
+            <span>🤖</span> Bot Configuration Manager
+          </h1>
+          <p style="margin: 0; font-size: 0.95rem; color: var(--text-muted);">
+            Manage your tf2autobot installations, inspect direct file bindings, and seamlessly switch active trading bots.
+          </p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <a href="/bot-config/discover" class="btn btn-primary"><span>🔍</span> Re-scan for Bots</a>
+          <a href="/bot-config/add" class="btn btn-success"><span>➕</span> Add Bot Manually</a>
+          <a href="/bot-config/export" class="btn btn-secondary"><span>📤</span> Export Config</a>
+        </div>
+      </div>
+    `;
 
-    // Summary Card
-    html +=
-      '<div style="background: #e8f4fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">';
-    html += '<h3>📊 Configuration Summary</h3>';
-    html += `<p><strong>Configuration Version:</strong> ${summary.version || 'Unknown'}</p>`;
-    html += `<p><strong>Total Bots Found:</strong> ${summary.totalBots}</p>`;
-    html += `<p><strong>Active Bots:</strong> ${summary.activeBots}</p>`;
+    // Summary Statistics Grid
+    html += `
+      <div class="stats-grid">
+        <div class="stat-card stat-info">
+          <div class="stat-top">
+            <span class="stat-title">Discovered Bots</span>
+            <div class="stat-icon-wrapper">🤖</div>
+          </div>
+          <div class="stat-value">${summary.totalBots}</div>
+          <p class="stat-desc">Total installations registered</p>
+        </div>
+
+        <div class="stat-card stat-ok">
+          <div class="stat-top">
+            <span class="stat-title">Active Bots</span>
+            <div class="stat-icon-wrapper">⚡</div>
+          </div>
+          <div class="stat-value">${summary.activeBots}</div>
+          <p class="stat-desc">Running and ready for trading</p>
+        </div>
+
+        <div class="stat-card stat-warn">
+          <div class="stat-top">
+            <span class="stat-title">Config Version</span>
+            <div class="stat-icon-wrapper">📋</div>
+          </div>
+          <div class="stat-value" style="font-size: 1.8rem;">${summary.version || 'v2.0'}</div>
+          <p class="stat-desc">Schema architecture</p>
+        </div>
+
+        <div class="stat-card stat-ok">
+          <div class="stat-top">
+            <span class="stat-title">Active Bot Status</span>
+            <div class="stat-icon-wrapper">✅</div>
+          </div>
+          <div class="stat-value" style="font-size: 1.3rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            ${summary.selectedBot ? summary.selectedBot.name : 'None Selected'}
+          </div>
+          <p class="stat-desc">${summary.selectedBot ? summary.selectedBot.id : 'Requires selection'}</p>
+        </div>
+      </div>
+    `;
+
     if (summary.selectedBot) {
-      html += `<p><strong>Selected Bot:</strong> ${summary.selectedBot.name} (${summary.selectedBot.id})</p>`;
-      html += `<p><strong>Bot Path:</strong> <code>${summary.selectedBot.path}</code></p>`;
-    } else {
-      html +=
-        '<p><strong>Selected Bot:</strong> <span style="color: red;">❌ No bot selected</span></p>';
+      html += `
+        <div class="ui-card" style="padding: 16px 20px; margin-bottom: 24px; border-left: 4px solid var(--ok);">
+          <div style="font-size: 0.9rem; color: var(--text-muted);">
+            Active Bot Path: <code style="margin-left: 6px;">${summary.selectedBot.path}</code>
+          </div>
+        </div>
+      `;
     }
-    html += `<p><strong>Last Discovery:</strong> ${summary.lastDiscovery ? new Date(summary.lastDiscovery).toLocaleString() : 'Never'}</p>`;
-    html += '</div>';
-
-    // Action Buttons
-    html += '<div style="margin-bottom: 20px;">';
-    html +=
-      '<a href="/bot-config/discover" style="background: #007cba; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; margin-right: 10px;">🔍 Re-scan for Bots</a>';
-    html +=
-      '<a href="/bot-config/add" style="background: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; margin-right: 10px;">➕ Add Bot Manually</a>';
-    html +=
-      '<a href="/bot-config/export" style="background: #6c757d; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">📤 Export Config</a>';
-    html += '</div>';
 
     if (allBots.length === 0) {
-      // No bots found
-      html +=
-        '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; text-align: center;">';
-      html += '<h3>⚠️ No Bots Found</h3>';
-      html += '<p>No tf2autobot installations were discovered automatically.</p>';
-      html += '<p>This could mean:</p>';
-      html += '<ul style="text-align: left; display: inline-block;">';
-      html += '<li>tf2autobot is not installed in common locations</li>';
-      html += '<li>Bot configurations are in non-standard directories</li>';
-      html += '<li>Permissions prevent access to bot directories</li>';
-      html += '</ul>';
-      html += '<p><strong>Solutions:</strong></p>';
-      html +=
-        '<p><a href="/bot-config/add" style="background: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">Add Bot Manually</a></p>';
-      html +=
-        '<p><a href="/bot-config/discover" style="background: #007cba; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">Re-run Discovery</a></p>';
-      html += '</div>';
+      html += `
+        <div class="ui-card" style="text-align: center; padding: 48px 24px;">
+          <div style="font-size: 40px; margin-bottom: 12px;">🤖</div>
+          <h3 style="margin: 0 0 8px 0;">No Bots Discovered</h3>
+          <p style="color: var(--text-muted); max-width: 500px; margin: 0 auto 20px auto;">
+            No tf2autobot instances were detected automatically. Provide direct file paths to configure your trading bot.
+          </p>
+          <a href="/bot-config/add" class="btn btn-success"><span>➕</span> Configure Bot Manually</a>
+        </div>
+      `;
     } else {
-      // Show bot list
-      html +=
-        '<div style="background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">';
-      html +=
-        '<h3 style="background: #f8f9fa; margin: 0; padding: 15px; border-bottom: 1px solid #ddd;">🤖 Available Bots</h3>';
+      html += `
+        <div class="table-container">
+          <div class="table-header-bar">
+            <div>
+              <h3 style="margin: 0;"><span>🤖</span> Available Bot Instances</h3>
+              <p style="margin: 4px 0 0 0; color: var(--text-muted);">Switch active pricelist tracking between registered tf2autobot bots</p>
+            </div>
+            <span class="badge badge-info">${allBots.length} registered</span>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 14%;">Status</th>
+                  <th style="width: 22%;">Bot Name</th>
+                  <th style="width: 18%;">Steam ID</th>
+                  <th style="width: 28%;">Pricelist / Storage Path</th>
+                  <th style="width: 18%; text-align: center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+      `;
 
-      html += '<table style="width: 100%; border-collapse: collapse;">';
-      html += '<thead style="background: #f8f9fa;">';
-      html += '<tr>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Status</th>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Bot Name</th>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Steam ID</th>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Pricelist Path</th>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Source</th>';
-      html +=
-        '<th style="padding: 12px; text-align: left; border-bottom: 1px solid #ddd;">Actions</th>';
-      html += '</tr>';
-      html += '</thead>';
-      html += '<tbody>';
-
-      allBots.forEach((bot, index) => {
+      allBots.forEach((bot) => {
         const isSelected = selectedBot && selectedBot.id === bot.id;
-        const rowStyle = isSelected
-          ? 'background: #e8f4fd;'
-          : index % 2 === 0
-            ? 'background: #f9f9f9;'
-            : '';
-
-        html += `<tr style="${rowStyle}">`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;">${isSelected ? '✅ Active' : '⭕ Available'}</td>`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><strong>${bot.name || 'Unnamed Bot'}</strong></td>`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><code>${bot.steamId || 'Unknown'}</code></td>`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;"><small><code>${bot.pricelistPath || bot.botPath || 'Not configured'}</code></small></td>`;
-        html += `<td style="padding: 12px; border-bottom: 1px solid #eee;">${bot.source || 'unknown'}</td>`;
-        html += '<td style="padding: 12px; border-bottom: 1px solid #eee;">';
+        html += `<tr class="${isSelected ? 'row-current' : ''}">`;
+        html += `<td>${isSelected ? '<span class="badge badge-ok">● Active Bot</span>' : '<span class="badge badge-muted">○ Available</span>'}</td>`;
+        html += `<td><strong>${bot.name || 'Unnamed Bot'}</strong></td>`;
+        html += `<td><code class="sku-badge">${bot.steamId || 'Unknown'}</code></td>`;
+        html += `<td><small style="color: var(--text-muted);"><code>${bot.pricelistPath || bot.botPath || 'Not configured'}</code></small></td>`;
+        html += '<td style="text-align: center;">';
 
         if (!isSelected) {
-          html += `<a href="/bot-config/select?id=${encodeURIComponent(bot.id)}" style="background: #007cba; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 12px; margin-right: 5px;">Select</a>`;
+          html += `<a href="/bot-config/select?id=${encodeURIComponent(bot.id)}" class="btn-icon-action act-add" style="margin-right: 6px;">Select Bot</a>`;
         }
 
         if (bot.source === 'manual') {
-          html += `<a href="/bot-config/remove?id=${encodeURIComponent(bot.id)}" style="background: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; font-size: 12px;" onclick="return confirm('Remove this bot configuration?')">Remove</a>`;
+          html += `<a href="/bot-config/remove?id=${encodeURIComponent(bot.id)}" class="btn-icon-action act-remove" onclick="return confirm('Remove this bot configuration?')">✕ Remove</a>`;
         }
 
         html += '</td>';
         html += '</tr>';
       });
 
-      html += '</tbody>';
-      html += '</table>';
-      html += '</div>';
+      html += `
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
     }
 
     // Migration Notice
     if (configManager.config.migration) {
-      html +=
-        '<div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 8px; margin-top: 20px;">';
-      html += '<h4>📋 Migration Notice</h4>';
-      html += `<p>Your configuration was automatically migrated from version ${configManager.config.migration.migratedFrom} on ${new Date(configManager.config.migration.migratedAt).toLocaleString()}.</p>`;
-      html +=
-        '<p>The old configuration has been backed up. The new format supports multiple bots and easier management.</p>';
-      html += '</div>';
+      html += `
+        <div class="ui-card" style="border-left: 4px solid var(--accent); padding: 18px 24px;">
+          <h4 style="margin: 0 0 6px 0;">📋 Architecture Migration Notice</h4>
+          <p style="margin: 0; font-size: 0.88rem; color: var(--text-muted);">
+            Configuration was migrated from version ${configManager.config.migration.migratedFrom} on ${new Date(configManager.config.migration.migratedAt).toLocaleString()}. Multi-bot profile switching is active.
+          </p>
+        </div>
+      `;
     }
 
     html += '</div>';
