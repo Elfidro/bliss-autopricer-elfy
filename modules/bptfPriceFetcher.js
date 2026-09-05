@@ -24,10 +24,56 @@ async function getBptfPrices(force = false) {
     params: { key: config.bptfAPIKey },
   });
   if (response.data && response.data.response && response.data.response.items) {
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(response.data.response.items, null, 2), 'utf8');
+    // Written compact on purpose: pretty-printing rebuilds the whole ~9 MB
+    // pricelist as a second, much larger string in memory for no benefit.
+    fs.writeFileSync(CACHE_PATH, JSON.stringify(response.data.response.items), 'utf8');
     return response.data.response.items;
   }
   throw new Error('Failed to fetch backpack.tf prices');
+}
+
+// defindex -> [[name, item], ...] index for one external pricelist object.
+//
+// getBptfItemPrice used to run Object.entries(items).filter(...) on every call.
+// `items` is the whole backpack.tf pricelist (tens of thousands of entries), so
+// every lookup allocated a fresh array of that many two-element arrays - and it
+// runs once per item on every pricing cycle. Indexing once per pricelist and
+// reusing it removes that churn entirely.
+//
+// Keyed weakly on the pricelist object itself, so when the scheduler swaps in a
+// freshly fetched pricelist the old index becomes collectable along with it.
+const defindexIndexCache = new WeakMap();
+
+function getDefindexIndex(items) {
+  let index = defindexIndexCache.get(items);
+  if (index) {
+    return index;
+  }
+  index = new Map();
+  const seen = new Set();
+  for (const entry of Object.entries(items)) {
+    const item = entry[1];
+    if (!item || !item.defindex) {
+      continue;
+    }
+    // `seen` guards against a defindex listed twice on the same item, which
+    // Array.prototype.filter would only ever have matched once.
+    seen.clear();
+    for (const defindex of item.defindex) {
+      if (seen.has(defindex)) {
+        continue;
+      }
+      seen.add(defindex);
+      const bucket = index.get(defindex);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        index.set(defindex, [entry]);
+      }
+    }
+  }
+  defindexIndexCache.set(items, index);
+  return index;
 }
 
 // Helper to get price for a specific SKU (handles unusuals and effects)
@@ -43,11 +89,7 @@ function getBptfItemPrice(items, sku) {
   const isUncraftable = parts.includes('uncraftable');
 
   // Find all items with this defindex
-  const candidates = Object.entries(items).filter(
-    // eslint-disable-next-line spellcheck/spell-checker
-    // eslint-disable-next-line no-unused-vars
-    ([name, item]) => item.defindex && item.defindex.includes(Number(defindex))
-  );
+  const candidates = getDefindexIndex(items).get(Number(defindex)) || [];
 
   // eslint-disable-next-line spellcheck/spell-checker
   // Prefer Australium-named item if SKU has australium
@@ -138,7 +180,9 @@ async function getAllPricedItemNamesWithEffects(
   schemaManager,
   dbConnection = null
 ) {
-  const names = [];
+  // A Set from the start: this can generate hundreds of thousands of names, and
+  // the old array-then-dedupe held both copies alive at peak.
+  const names = new Set();
   const qualities = schemaManager.schema.qualities || {};
   const qualitiesById = {};
   for (const [name, id] of Object.entries(qualities)) {
@@ -224,7 +268,7 @@ async function getAllPricedItemNamesWithEffects(
                   // Only add quality if not Unique (6) and not Unusual (5)
                   const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
                   // Compose: "Non-Craftable Strange Professional Killstreak Burning Flames Item"
-                  names.push(`${craftPrefix}${prefix}${ksPrefix}${effectName} ${itemName}`.trim());
+                  names.add(`${craftPrefix}${prefix}${ksPrefix}${effectName} ${itemName}`.trim());
                 }
               }
             } else {
@@ -234,7 +278,7 @@ async function getAllPricedItemNamesWithEffects(
                 const ksPrefix = ksName ? ksName + ' ' : '';
                 const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
                 // Compose: "Non-Craftable Strange Professional Killstreak Item"
-                names.push(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
+                names.add(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
               }
             }
           } else if (Array.isArray(arrOrObj)) {
@@ -245,14 +289,14 @@ async function getAllPricedItemNamesWithEffects(
               // Only add quality if not Unique (6) and not Unusual (5)
               const prefix = qualityId !== '6' && qualityId !== '5' ? qualityName + ' ' : '';
               // Compose: "Non-Craftable Strange Professional Killstreak Item"
-              names.push(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
+              names.add(`${craftPrefix}${prefix}${ksPrefix}${itemName}`.trim());
             }
           }
         }
       }
     }
   }
-  return [...new Set(names)];
+  return [...names];
 }
 
 module.exports = { getBptfPrices, getBptfItemPrice, getAllPricedItemNamesWithEffects };

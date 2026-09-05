@@ -1,5 +1,3 @@
-const pLimit = require('p-limit').default;
-
 async function updateMovingAverages(db, pgp, alpha = 0.35) {
   if (alpha <= 0 || alpha > 1) {
     throw new Error('Alpha must be between 0 (exclusive) and 1 (inclusive).');
@@ -20,37 +18,36 @@ async function updateMovingAverages(db, pgp, alpha = 0.35) {
   // This prevents extremely small values that could cause database errors with float columns.
   const clampAndRound = (val, min = 0.05) => Math.max(min, Math.round(val * 100) / 100);
 
-  const updates = stats
-    .map((row) => {
-      const prevAvg = row.moving_avg_count ?? row.current_count;
-      const prevBuyAvg = row.moving_avg_buy_count ?? row.current_buy_count;
-      const prevSellAvg = row.moving_avg_sell_count ?? row.current_sell_count;
-      // Calculate new averages
-      let newAvg = alpha * row.current_count + (1 - alpha) * prevAvg;
-      let newBuyAvg = alpha * row.current_buy_count + (1 - alpha) * prevBuyAvg;
-      let newSellAvg = alpha * row.current_sell_count + (1 - alpha) * prevSellAvg;
-      // Clamp and round to 2 decimals, minimum 0.05
-      newAvg = clampAndRound(newAvg);
-      newBuyAvg = clampAndRound(newBuyAvg);
-      newSellAvg = clampAndRound(newSellAvg);
-      return {
-        sku: row.sku,
-        moving_avg_count: newAvg,
-        moving_avg_buy_count: newBuyAvg,
-        moving_avg_sell_count: newSellAvg,
-      };
-    })
-    .filter((u) => {
-      const orig = stats.find((r) => r.sku === u.sku);
-      return (
-        Math.abs((orig.moving_avg_count ?? orig.current_count) - u.moving_avg_count) > 1e-6 ||
-        Math.abs((orig.moving_avg_buy_count ?? orig.current_buy_count) - u.moving_avg_buy_count) >
-          1e-6 ||
-        Math.abs(
-          (orig.moving_avg_sell_count ?? orig.current_sell_count) - u.moving_avg_sell_count
-        ) > 1e-6
-      );
+  // One pass: compute the new averages and keep only the rows that actually
+  // moved. The old version mapped every row and then, for each result, scanned
+  // the whole stats array again to find its original - O(n^2) over a table that
+  // grows to tens of thousands of skus, with a full intermediate array of every
+  // row (changed or not) alive at the same time.
+  const updates = [];
+  for (const row of stats) {
+    const prevAvg = row.moving_avg_count ?? row.current_count;
+    const prevBuyAvg = row.moving_avg_buy_count ?? row.current_buy_count;
+    const prevSellAvg = row.moving_avg_sell_count ?? row.current_sell_count;
+
+    const newAvg = clampAndRound(alpha * row.current_count + (1 - alpha) * prevAvg);
+    const newBuyAvg = clampAndRound(alpha * row.current_buy_count + (1 - alpha) * prevBuyAvg);
+    const newSellAvg = clampAndRound(alpha * row.current_sell_count + (1 - alpha) * prevSellAvg);
+
+    const changed =
+      Math.abs(prevAvg - newAvg) > 1e-6 ||
+      Math.abs(prevBuyAvg - newBuyAvg) > 1e-6 ||
+      Math.abs(prevSellAvg - newSellAvg) > 1e-6;
+    if (!changed) {
+      continue;
+    }
+
+    updates.push({
+      sku: row.sku,
+      moving_avg_count: newAvg,
+      moving_avg_buy_count: newBuyAvg,
+      moving_avg_sell_count: newSellAvg,
     });
+  }
 
   if (updates.length === 0) {
     console.log('No moving averages changed.');
@@ -74,16 +71,43 @@ async function updateMovingAverages(db, pgp, alpha = 0.35) {
             WHERE ls.sku = tmp.sku
         `);
 
-    // Fetch and log updated rows for validation
-    const updatedSkus = updates.map((u) => u.sku);
-    const updatedRows = await db.any(
-      'SELECT sku, moving_avg_count, moving_avg_buy_count, moving_avg_sell_count FROM listing_stats WHERE sku IN ($1:csv) ORDER BY sku',
-      [updatedSkus]
-    );
-    console.log('Updated moving averages:', updatedRows);
+    // Deliberately not read back and logged: the old code re-selected every
+    // updated row and console.logged the whole array, which allocated a second
+    // copy of the result set and wrote megabytes into the pm2 log each run.
+    console.log(`Updated moving averages for ${updates.length} skus.`);
   } catch (err) {
     console.error('Error updating moving averages:', err);
   }
+}
+
+// Recount stats for many skus in a single statement.
+//
+// The per-sku version below is still used on the single-listing paths, but the
+// batch paths used to call it once per sku - hundreds of round-trips per
+// websocket flush, each allocating its own query text and result object.
+async function updateListingStatsBatch(db, skus) {
+  if (!skus || skus.length === 0) {
+    return;
+  }
+  await db.none(
+    `
+    INSERT INTO listing_stats (sku, current_count, current_buy_count, current_sell_count, last_updated)
+    SELECT sku,
+           COUNT(*),
+           COUNT(*) FILTER (WHERE intent = 'buy'),
+           COUNT(*) FILTER (WHERE intent = 'sell'),
+           NOW()
+    FROM listings
+    WHERE sku IN ($1:csv)
+    GROUP BY sku
+    ON CONFLICT (sku) DO UPDATE SET
+        current_count = EXCLUDED.current_count,
+        current_buy_count = EXCLUDED.current_buy_count,
+        current_sell_count = EXCLUDED.current_sell_count,
+        last_updated = NOW()
+  `,
+    [skus]
+  );
 }
 
 async function updateListingStats(db, sku) {
@@ -113,13 +137,20 @@ async function updateListingStats(db, sku) {
 async function initializeListingStats(db) {
   const skus = await db.any('SELECT DISTINCT sku FROM listings');
   console.log(`Initializing listing stats for ${skus.length} SKUs...`);
-  const limit = pLimit(10);
-  await Promise.all(skus.map(({ sku }) => limit(() => updateListingStats(db, sku))));
+  // Chunked so the parameter list stays a sane size on a large listings table.
+  const CHUNK = 2000;
+  for (let i = 0; i < skus.length; i += CHUNK) {
+    await updateListingStatsBatch(
+      db,
+      skus.slice(i, i + CHUNK).map((r) => r.sku)
+    );
+  }
   console.log('Listing stats initialized.');
 }
 
 module.exports = {
   updateMovingAverages,
   updateListingStats,
+  updateListingStatsBatch,
   initializeListingStats,
 };

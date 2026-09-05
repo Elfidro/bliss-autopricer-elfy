@@ -90,7 +90,9 @@ if (fs.existsSync(SCHEMA_PATH)) {
   // A cached schema exists.
 
   // Read and parse the cached schema.
-  const cachedData = JSON.parse(fs.readFileSync(SCHEMA_PATH), 'utf8');
+  // Note the encoding goes to readFileSync, not JSON.parse - without it this
+  // read the whole ~20 MB schema into a Buffer and then decoded it again.
+  const cachedData = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'));
 
   // Set the schema data.
   schemaManager.setSchema(cachedData);
@@ -361,6 +363,18 @@ const calculateAndEmitPrices = async () => {
   const priceHistoryEntries = [];
   const itemsToWrite = [];
 
+  // Read the pricelist once for the whole cycle. finalisePrice used to read and
+  // parse the entire file for every single item, 15 parses in flight at a time.
+  let prevBySku = new Map();
+  try {
+    const currentPricelist = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8'));
+    for (const entry of currentPricelist.items || []) {
+      prevBySku.set(entry.sku, entry);
+    }
+  } catch (err) {
+    console.error('Could not read pricelist for previous prices:', err.message);
+  }
+
   console.log(`About to price ${itemNames.length} items. `);
 
   await Promise.allSettled(
@@ -375,7 +389,7 @@ const calculateAndEmitPrices = async () => {
           }
 
           let arr = await determinePrice(name, sku);
-          let result = await finalisePrice(arr, name, sku);
+          let result = await finalisePrice(arr, name, sku, prevBySku);
 
           let item = result?.item;
           if (!result || !result.item) {
@@ -397,6 +411,10 @@ const calculateAndEmitPrices = async () => {
       })
     )
   );
+
+  // The per-item previous prices are no longer needed; drop the reference so
+  // the whole parsed pricelist can be collected before the rewrite below.
+  prevBySku = null;
 
   // Batch write pricelist at the end
   try {
@@ -440,13 +458,12 @@ schemaManager.init(async function (err) {
   // You can pass a custom ageThresholdSec (default is 2*3600) and intervalSec (default is 300)
   PriceWatcher.watchPrices(pricelistPath /*, ageThresholdSec, intervalSec */);
 
-  // Get external pricelist.
+  // Get external pricelist. (Fetched once - this used to be called twice in a
+  // row on startup, parsing the ~9 MB pricelist a second time for nothing.)
   external_pricelist = await getBptfPrices(); //await Methods.getExternalPricelist();
   // Update key object from pricedb.io
   await updateKeyObject();
   console.log(`Key object initialised from pricedb.io: ${JSON.stringify(keyobj)}`);
-  // Get external pricelist.
-  external_pricelist = await getBptfPrices();
   // Calculate and emit prices on start up.
   await calculateAndEmitPrices();
   console.log('Prices calculated and emitted on startup.');
@@ -624,8 +641,10 @@ async function isPriceSwingAcceptable(prev, next, sku) {
 }
 
 const determinePrice = async (name, sku) => {
-  // Delete listings based on moving averages.
-  await deleteOldListings(db);
+  // deleteOldListings is deliberately NOT called here. calculateAndEmitPrices
+  // already runs it once per cycle; running it again per item (15 at a time)
+  // re-swept the whole listings table thousands of times per cycle for deletes
+  // that the first sweep had already made.
 
   // Try fetching listings for both name and 'The ' + name if needed
   var buyListings = await getListings(db, name, 'buy');
@@ -871,14 +890,20 @@ const filterOutliers = (listingsArray) => {
   return filteredMean;
 };
 
-async function isSellPriceOutlier(sku, candidateSellMetal, threshold = 3) {
+// Fetch a sku's recent sell history once and return a synchronous predicate.
+//
+// The caller tests every sell listing in turn until one is not an outlier; the
+// history it compares against is the same for all of them, so the old
+// per-candidate isSellPriceOutlier ran the identical query (and rebuilt the
+// identical result set) once per listing.
+async function getSellPriceOutlierChecker(sku, threshold = 3) {
   // Fetch last 10 sell prices from history
   const history = await db.any(
     'SELECT sell_metal FROM price_history WHERE sku = $1 ORDER BY timestamp DESC LIMIT 10',
     [sku]
   );
   if (history.length < 3) {
-    return false;
+    return () => false;
   } // Not enough data to judge
 
   const prices = history.map((p) => Number(p.sell_metal));
@@ -887,11 +912,10 @@ async function isSellPriceOutlier(sku, candidateSellMetal, threshold = 3) {
 
   // If stddev is 0 (all prices the same), only allow exact match
   if (stdDev === 0) {
-    return candidateSellMetal !== mean;
+    return (candidateSellMetal) => candidateSellMetal !== mean;
   }
 
-  const zScore = (candidateSellMetal - mean) / stdDev;
-  return Math.abs(zScore) > threshold;
+  return (candidateSellMetal) => Math.abs((candidateSellMetal - mean) / stdDev) > threshold;
 }
 
 const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) => {
@@ -973,11 +997,11 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
     if (sellFiltered.length > 0) {
       // Try trusted listings first, but skip if they're outliers
       let picked = null;
+      const isOutlier = await getSellPriceOutlierChecker(sku);
       for (let i = 0; i < sellFiltered.length; i++) {
         const candidate = sellFiltered[i];
         const candidateMetal = Methods.toMetal(candidate.currencies, keyobj.metal);
-        // Await the outlier check
-        if (!(await isSellPriceOutlier(sku, candidateMetal))) {
+        if (!isOutlier(candidateMetal)) {
           picked = candidate;
           break;
         }
@@ -1106,7 +1130,7 @@ function clamp(val, min, max) {
   return val;
 }
 
-const finalisePrice = async (arr, name, sku) => {
+const finalisePrice = async (arr, name, sku, prevBySku = null) => {
   let item = {};
   try {
     if (!arr) {
@@ -1221,9 +1245,11 @@ const finalisePrice = async (arr, name, sku) => {
         }
       }
 
-      // Load previous price from pricelist if available
-      const pricelist = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8'));
-      const prev = pricelist.items.find((i) => i.sku === sku);
+      // Previous price, from the map the caller built once for this cycle.
+      // Falls back to a disk read only if called without one.
+      const prev = prevBySku
+        ? prevBySku.get(sku)
+        : JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8')).items.find((i) => i.sku === sku);
 
       // Only check if previous price exists (skip price swing check for keys)
       if (prev && sku !== '5021;6') {

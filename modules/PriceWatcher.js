@@ -28,12 +28,18 @@ function checkOldPrices(pricelistPath, ageThresholdSec = 2 * 3600) {
       console.log(
         `Found ${oldItems.length} out of ${totalItems.length} items older than ${ageThresholdSec / 3600} hours:`
       );
-      oldItems.forEach((item) => {
+      // Capped: this is a diagnostic, and on a stalled pricer every item in the
+      // pricelist qualifies - thousands of lines into the pm2 log per run.
+      const SHOWN = 20;
+      for (const item of oldItems.slice(0, SHOWN)) {
         const ageHr = ((now - item.time) / 3600).toFixed(2);
         console.log(
           ` - ${item.name} (SKU: ${item.sku}) is ${ageHr} hours old (timestamp: ${item.time})`
         );
-      });
+      }
+      if (oldItems.length > SHOWN) {
+        console.log(` - ...and ${oldItems.length - SHOWN} more.`);
+      }
     } else {
       console.log(`No items older than ${ageThresholdSec / 3600} hours.`);
     }

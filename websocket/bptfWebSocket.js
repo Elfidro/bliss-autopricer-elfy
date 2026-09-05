@@ -8,6 +8,11 @@ const { startRelayServer } = require('./relayServer');
 let insertQueue = [];
 let insertTimer = null;
 const INSERT_BATCH_INTERVAL = 10000; // ms
+// Hard ceiling on the pending-insert buffer. If Postgres stalls, the socket
+// keeps delivering listings regardless; without a cap the queue is the one
+// thing here that can grow without bound.
+const INSERT_QUEUE_MAX = 20000;
+let insertQueueDropped = 0;
 
 // Connection health monitoring
 let lastMessageTime = Date.now();
@@ -77,6 +82,13 @@ function initBptfWebSocket({
   console.log(`[WebSocket] Attempting to connect to: ${websocketUrl}`);
   const rws = new ReconnectingWebSocket(websocketUrl, undefined, reconnectOptions);
 
+  // Rolled-up feed counters, printed once a minute (see the message handler).
+  const BATCH_SUMMARY_INTERVAL = 60000;
+  let lastBatchSummary = Date.now();
+  let batchEventCount = 0;
+  let batchUpdateCount = 0;
+  let batchDeleteCount = 0;
+
   // Health monitoring function
   function startHealthMonitoring() {
     if (healthCheckInterval) {
@@ -95,11 +107,10 @@ function initBptfWebSocket({
         if (rws.readyState === WebSocket.OPEN) {
           rws.reconnect();
         }
-      } else {
-        // Log periodic health status
-        const msg = `[WebSocket] Health check: ${messageCount} messages received, last message ${Math.round(timeSinceLastMessage / 1000)}s ago`;
-        logWebSocketEvent(logFile, msg);
       }
+      // The healthy case is deliberately not written to websocket.log. It fired
+      // every 30s forever and was the main reason that file grew without bound;
+      // bptf-autopricer.js already prints the same status to the pm2 log.
     }, HEALTH_CHECK_INTERVAL);
   }
 
@@ -111,29 +122,61 @@ function initBptfWebSocket({
   }
 
   async function flushInsertQueue() {
-    if (insertQueue.length === 0) {
+    // Detach the batch and clear the timer up front. The old version cleared
+    // insertQueue *after* awaiting the insert, silently discarding every
+    // listing that arrived during the write, and left insertTimer set for the
+    // duration so nothing rescheduled a flush for them either.
+    const batch = insertQueue;
+    insertQueue = [];
+    insertTimer = null;
+    if (batch.length === 0) {
       return;
     }
     try {
-      await insertListingsBatch(insertQueue);
+      await insertListingsBatch(batch);
     } catch (err) {
       console.error('[WebSocket] Batch insert error:', err);
     }
-    insertQueue = [];
-    insertTimer = null;
+    if (insertQueue.length > 0 && !insertTimer) {
+      insertTimer = setTimeout(flushInsertQueue, INSERT_BATCH_INTERVAL);
+    }
   }
 
   function queueInsertListing(...args) {
+    if (insertQueue.length >= INSERT_QUEUE_MAX) {
+      insertQueueDropped++;
+      if (insertQueueDropped % 1000 === 1) {
+        console.warn(
+          `[WebSocket] Insert queue full (${INSERT_QUEUE_MAX}); dropped ${insertQueueDropped} listings so far. Is the database keeping up?`
+        );
+      }
+      return;
+    }
     insertQueue.push(args);
     if (!insertTimer) {
       insertTimer = setTimeout(flushInsertQueue, INSERT_BATCH_INTERVAL);
     }
   }
 
+  // Precomputed once per connection rather than per listing. These were being
+  // rebuilt inside the message handler: a RegExp per excluded description per
+  // listing, and a fresh stringified array of every blocked attribute value per
+  // attribute of every listing. At backpack.tf's event rate that was the single
+  // largest source of short-lived garbage in the process.
+  const excludedSteamIdSet = new Set(excludedSteamIds || []);
+  const excludedDescriptionPatterns = (excludedListingDescriptions || []).map(
+    (detail) => new RegExp(`\\b${detail}\\b`, 'i')
+  );
+  const blockedAttributeValues = new Set(Object.values(blockedAttributes || {}).map(String));
+  const blockedAttributeNames = Object.keys(blockedAttributes || {});
+
+  let ignoredEventCount = 0;
+
   function handleEvent(e) {
     if (!e.payload || !e.payload.item || !e.payload.item.name) {
-      // Optionally log ignored events for debugging:
-      console.log('[WebSocket] Ignored event:', e);
+      // Counted rather than logged: this fires on ordinary feed traffic and
+      // console.log(e) serialised the whole event object every time.
+      ignoredEventCount++;
       return;
     }
     if (allowAllItems() || getAllowedItemNames().has(e.payload.item.name)) {
@@ -168,10 +211,8 @@ function initBptfWebSocket({
               return (
                 typeof attribute === 'object' &&
                 attribute.float_value &&
-                Object.values(blockedAttributes)
-                  .map(String)
-                  .includes(String(attribute.float_value)) &&
-                !Object.keys(blockedAttributes).some((key) => response_item.name.includes(key))
+                blockedAttributeValues.has(String(attribute.float_value)) &&
+                !blockedAttributeNames.some((key) => response_item.name.includes(key))
               );
             })
           ) {
@@ -180,14 +221,14 @@ function initBptfWebSocket({
 
           currencies = Methods.createCurrencyObject(currencies);
 
-          if (!excludedSteamIds.some((id) => steamid === id)) {
+          if (!excludedSteamIdSet.has(steamid)) {
+            // Normalised once, not once per excluded description.
+            const normalisedDetails = listingDetails
+              ? listingDetails.normalize('NFKD').toLowerCase().trim()
+              : null;
             if (
-              listingDetails &&
-              !excludedListingDescriptions.some((detail) =>
-                new RegExp(`\\b${detail}\\b`, 'i').test(
-                  listingDetails.normalize('NFKD').toLowerCase().trim()
-                )
-              )
+              normalisedDetails &&
+              !excludedDescriptionPatterns.some((pattern) => pattern.test(normalisedDetails))
             ) {
               try {
                 var sku = schemaManager.schema.getSkuFromName(response_item.name);
@@ -265,22 +306,34 @@ function initBptfWebSocket({
 
     var json = JSON.parse(event.data);
     if (json instanceof Array) {
-      let updateCount = 0;
-      let deleteCount = 0;
-      json.forEach((ev) => {
+      // One pass instead of two, and the per-batch line is now a periodic
+      // summary: at backpack.tf's event rate the old log wrote a line for every
+      // frame, which is most of what fills the pm2 log on this droplet.
+      for (const ev of json) {
         if (ev.event === 'listing-update') {
-          updateCount++;
+          batchUpdateCount++;
         } else if (ev.event === 'listing-delete') {
-          deleteCount++;
+          batchDeleteCount++;
         }
-      });
-      console.log(
-        `[WebSocket] Received batch: ${json.length} events (${updateCount} updates, ${deleteCount} deletions)`
-      );
-      json.forEach(handleEvent);
+        handleEvent(ev);
+      }
+      batchEventCount += json.length;
     } else {
-      console.log('[WebSocket] Received single bptf event');
+      batchEventCount++;
       handleEvent(json);
+    }
+
+    if (Date.now() - lastBatchSummary >= BATCH_SUMMARY_INTERVAL) {
+      console.log(
+        `[WebSocket] ${batchEventCount} events in the last ${Math.round((Date.now() - lastBatchSummary) / 1000)}s ` +
+          `(${batchUpdateCount} updates, ${batchDeleteCount} deletions, ${ignoredEventCount} ignored, ` +
+          `${insertQueue.length} queued for insert)`
+      );
+      lastBatchSummary = Date.now();
+      batchEventCount = 0;
+      batchUpdateCount = 0;
+      batchDeleteCount = 0;
+      ignoredEventCount = 0;
     }
   });
 

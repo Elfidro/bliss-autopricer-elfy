@@ -1,3 +1,5 @@
+const { updateListingStatsBatch } = require('./listingAverages');
+
 const getListings = async (db, name, intent) => {
   return await db.result('SELECT * FROM listings WHERE name = $1 AND intent = $2', [name, intent]);
 };
@@ -22,14 +24,23 @@ const insertListingsBatch = async (
   const dedupedListings = Array.from(dedupedMap.values());
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const values = dedupedListings.map(([response_item, sku, currencies, intent, steamid]) => [
-    response_item.name,
-    sku,
-    JSON.stringify(currencies),
-    intent,
-    timestamp,
-    steamid,
-  ]);
+  // Build the row objects once. This used to build an array of arrays and then
+  // map it into an array of objects, holding two full copies of every listing
+  // in the batch at the same time.
+  const uniqueSkus = new Set();
+  const rows = new Array(dedupedListings.length);
+  for (let i = 0; i < dedupedListings.length; i++) {
+    const [response_item, sku, currencies, intent, steamid] = dedupedListings[i];
+    uniqueSkus.add(sku);
+    rows[i] = {
+      name: response_item.name,
+      sku,
+      currencies: JSON.stringify(currencies),
+      intent,
+      updated: timestamp,
+      steamid,
+    };
+  }
 
   // Use pg-promise helpers for batch insert
   const cs = new pgp.helpers.ColumnSet(
@@ -37,25 +48,16 @@ const insertListingsBatch = async (
     { table: 'listings' }
   );
   const query =
-    pgp.helpers.insert(
-      values.map((v) => ({
-        name: v[0],
-        sku: v[1],
-        currencies: v[2],
-        intent: v[3],
-        updated: v[4],
-        steamid: v[5],
-      })),
-      cs
-    ) +
+    pgp.helpers.insert(rows, cs) +
     ` ON CONFLICT (name, sku, intent, steamid)
       DO UPDATE SET currencies = EXCLUDED.currencies, updated = EXCLUDED.updated;`;
 
   await db.none(query);
 
-  // Optionally, update stats for all unique skus
-  const uniqueSkus = [...new Set(values.map((v) => v[1]))];
-  await Promise.all(uniqueSkus.map((sku) => updateListingStats(db, sku)));
+  // Recount stats for every sku we touched in one statement. This used to fan
+  // out one round-trip per sku (hundreds every flush), each building its own
+  // query text and result object.
+  await updateListingStatsBatch(db, Array.from(uniqueSkus));
 };
 
 const insertListing = async (
@@ -98,122 +100,35 @@ const deleteRemovedListing = async (db, updateListingStats, steamid, name, inten
 
 const HARD_MAX_AGE_SECONDS = 5 * 24 * 60 * 60; // 5 days
 
+// How long a listing may sit unrefreshed before it is dropped, by how active
+// the sku is. Unchanged from the per-band JS version this replaced; expressed
+// as SQL so the whole sweep is one statement instead of pulling every row of
+// listing_stats into the process and sending back a dozen multi-megabyte
+// "sku IN (...)" parameter lists.
+const AGE_BANDS = (column) => `
+  CASE
+    WHEN ${column} > 10 THEN 7200
+    WHEN ${column} > 8 THEN 14400
+    WHEN ${column} > 6 THEN 28800
+    WHEN ${column} > 4 THEN 172800
+    WHEN ${column} > 2 THEN 432000
+    ELSE 604800
+  END`;
+
 const deleteOldListings = async (db) => {
-  const stats = await db.any(
-    'SELECT sku, moving_avg_buy_count, moving_avg_sell_count FROM listing_stats'
+  await db.none(
+    `
+    DELETE FROM listings l
+    USING listing_stats s
+    WHERE l.sku = s.sku
+      AND l.intent IN ('buy', 'sell')
+      AND EXTRACT(EPOCH FROM NOW() - to_timestamp(l.updated)) >=
+        CASE WHEN l.intent = 'buy'
+             THEN ${AGE_BANDS('s.moving_avg_buy_count')}
+             ELSE ${AGE_BANDS('s.moving_avg_sell_count')}
+        END
+  `
   );
-  const buyBands = {
-    veryActive: [],
-    active: [],
-    moderatelyActive: [],
-    somewhatActive: [],
-    lowActive: [],
-    rare: [],
-  };
-  const sellBands = {
-    veryActive: [],
-    active: [],
-    moderatelyActive: [],
-    somewhatActive: [],
-    lowActive: [],
-    rare: [],
-  };
-
-  for (const row of stats) {
-    // Buy bands
-    if (row.moving_avg_buy_count > 10) {
-      buyBands.veryActive.push(row.sku);
-    } else if (row.moving_avg_buy_count > 8) {
-      buyBands.active.push(row.sku);
-    } else if (row.moving_avg_buy_count > 6) {
-      buyBands.moderatelyActive.push(row.sku);
-    } else if (row.moving_avg_buy_count > 4) {
-      buyBands.somewhatActive.push(row.sku);
-    } else if (row.moving_avg_buy_count > 2) {
-      buyBands.lowActive.push(row.sku);
-    } else {
-      buyBands.rare.push(row.sku);
-    }
-
-    // Sell bands
-    if (row.moving_avg_sell_count > 10) {
-      sellBands.veryActive.push(row.sku);
-    } else if (row.moving_avg_sell_count > 8) {
-      sellBands.active.push(row.sku);
-    } else if (row.moving_avg_sell_count > 6) {
-      sellBands.moderatelyActive.push(row.sku);
-    } else if (row.moving_avg_sell_count > 4) {
-      sellBands.somewhatActive.push(row.sku);
-    } else if (row.moving_avg_sell_count > 2) {
-      sellBands.lowActive.push(row.sku);
-    } else {
-      sellBands.rare.push(row.sku);
-    }
-  }
-
-  // Now delete buy listings by their bands
-  for (const [band, skus] of Object.entries(buyBands)) {
-    if (skus.length === 0) {
-      continue;
-    }
-    let age;
-    switch (band) {
-      case 'veryActive':
-        age = 120 * 60;
-        break;
-      case 'active':
-        age = 4 * 3600;
-        break;
-      case 'moderatelyActive':
-        age = 8 * 3600;
-        break;
-      case 'somewhatActive':
-        age = 48 * 3600;
-        break;
-      case 'lowActive':
-        age = 5 * 24 * 3600;
-        break;
-      case 'rare':
-        age = 7 * 24 * 3600;
-        break;
-    }
-    await db.none(
-      "DELETE FROM listings WHERE sku IN ($1:csv) AND intent = 'buy' AND EXTRACT(EPOCH FROM NOW() - to_timestamp(updated)) >= $2",
-      [skus, age]
-    );
-  }
-
-  // Now delete sell listings by their bands
-  for (const [band, skus] of Object.entries(sellBands)) {
-    if (skus.length === 0) {
-      continue;
-    }
-    let age;
-    switch (band) {
-      case 'veryActive':
-        age = 120 * 60;
-        break;
-      case 'active':
-        age = 4 * 3600;
-        break;
-      case 'moderatelyActive':
-        age = 8 * 3600;
-        break;
-      case 'somewhatActive':
-        age = 48 * 3600;
-        break;
-      case 'lowActive':
-        age = 5 * 24 * 3600;
-        break;
-      case 'rare':
-        age = 7 * 24 * 3600;
-        break;
-    }
-    await db.none(
-      "DELETE FROM listings WHERE sku IN ($1:csv) AND intent = 'sell' AND EXTRACT(EPOCH FROM NOW() - to_timestamp(updated)) >= $2",
-      [skus, age]
-    );
-  }
 
   // Fail safe: delete any listing older than the hard max age
   await db.none(
