@@ -151,5 +151,10 @@
       "sell": -25
     }
   },
-  "apiRequestLogging": true
+  "apiRequestLogging": true,
+  "websocketBroadcast": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 7791
+  }
 }

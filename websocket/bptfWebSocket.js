@@ -3,6 +3,7 @@ const { clearInterval, setInterval } = require('timers');
 const ReconnectingWebSocket = require('reconnecting-websocket');
 const ws = require('ws');
 const { WebSocket } = require('ws');
+const { startRelayServer } = require('./relayServer');
 
 let insertQueue = [];
 let insertTimer = null;
@@ -61,6 +62,17 @@ function initBptfWebSocket({
     websocketUrl = 'wss://ws.backpack.tf/events/';
     console.log('[WebSocket] Using direct backpack.tf connection');
   }
+
+  // Re-broadcast the upstream feed so other processes on this host do not
+  // need their own backpack.tf connection (bpft rejects a second one).
+  const broadcastCfg = config?.websocketBroadcast || {};
+  const relay =
+    broadcastCfg.enabled === false
+      ? { broadcast: () => 0, clientCount: () => 0, close: () => {} }
+      : startRelayServer({
+          host: broadcastCfg.host || '127.0.0.1',
+          port: broadcastCfg.port || 7791,
+        });
 
   console.log(`[WebSocket] Attempting to connect to: ${websocketUrl}`);
   const rws = new ReconnectingWebSocket(websocketUrl, undefined, reconnectOptions);
@@ -247,6 +259,10 @@ function initBptfWebSocket({
     lastMessageTime = Date.now();
     messageCount++;
 
+    // Forward verbatim before any filtering — consumers have their own
+    // criteria, and handleEvent below only keeps watchlist items.
+    relay.broadcast(event.data);
+
     var json = JSON.parse(event.data);
     if (json instanceof Array) {
       let updateCount = 0;
@@ -272,6 +288,7 @@ function initBptfWebSocket({
     websocket: rws,
     close: () => {
       stopHealthMonitoring();
+      relay.close();
       rws.close();
     },
     getStats: () => ({

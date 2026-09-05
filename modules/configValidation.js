@@ -45,6 +45,15 @@ const DEFAULTS = {
   // (0.11 ref), so below roughly 2.2 ref a single scrap already exceeds a 5%
   // limit and nothing can ever price. Items whose baseline buy price is under
   // thresholdRef are judged against these looser limits instead.
+  // Re-broadcast the backpack.tf feed to other local processes. backpack.tf
+  // refuses a second connection from the same host, so consumers such as
+  // TradingToolsTF2 read the stream from here instead of opening their own.
+  // Loopback-bound: same-host only, nothing exposed publicly.
+  websocketBroadcast: {
+    enabled: true,
+    host: '127.0.0.1',
+    port: 7791,
+  },
   lowValuePricing: {
     thresholdRef: 5,
     maxPercentageDifferences: {
