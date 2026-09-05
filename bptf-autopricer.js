@@ -369,10 +369,17 @@ const calculateAndEmitPrices = async () => {
   try {
     const currentPricelist = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8'));
     for (const entry of currentPricelist.items || []) {
-      prevBySku.set(entry.sku, entry);
+      // First entry wins, matching the .find() this replaced.
+      if (!prevBySku.has(entry.sku)) {
+        prevBySku.set(entry.sku, entry);
+      }
     }
   } catch (err) {
+    // Hand finalisePrice a null so it falls back to its own per-item read (and
+    // its own failure handling). An empty map here would mean "no previous
+    // price for anything" and silently switch off the swing check.
     console.error('Could not read pricelist for previous prices:', err.message);
+    prevBySku = null;
   }
 
   console.log(`About to price ${itemNames.length} items. `);

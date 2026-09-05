@@ -24,8 +24,10 @@ module.exports = {
       script: 'bptf-autopricer.js',
       node_args: '--max-old-space-size=512',
       // Safety net, not the primary mechanism: a restart here means something
-      // leaked, so it is set well above the cap above.
-      max_memory_restart: '700M',
+      // leaked, so it sits well above the heap cap. RSS also carries the new
+      // space, code space and native buffers (pg, ws), so a heap legitimately
+      // at 512 MB can put RSS past 700 MB; 900 MB keeps this a leak-only trip.
+      max_memory_restart: '900M',
       watch: false,
       autorestart: true,
     },

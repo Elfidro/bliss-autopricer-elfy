@@ -121,7 +121,17 @@ function initBptfWebSocket({
     }
   }
 
+  let flushing = false;
+
   async function flushInsertQueue() {
+    // Never two flushes at once: two multi-row upserts on overlapping keys in
+    // different row orders can deadlock in Postgres, and the loser's whole
+    // batch would be lost. If a flush is still running when the timer fires,
+    // push the timer back and let the running flush reschedule when it ends.
+    if (flushing) {
+      insertTimer = setTimeout(flushInsertQueue, INSERT_BATCH_INTERVAL);
+      return;
+    }
     // Detach the batch and clear the timer up front. The old version cleared
     // insertQueue *after* awaiting the insert, silently discarding every
     // listing that arrived during the write, and left insertTimer set for the
@@ -132,10 +142,13 @@ function initBptfWebSocket({
     if (batch.length === 0) {
       return;
     }
+    flushing = true;
     try {
       await insertListingsBatch(batch);
     } catch (err) {
       console.error('[WebSocket] Batch insert error:', err);
+    } finally {
+      flushing = false;
     }
     if (insertQueue.length > 0 && !insertTimer) {
       insertTimer = setTimeout(flushInsertQueue, INSERT_BATCH_INTERVAL);
@@ -222,12 +235,14 @@ function initBptfWebSocket({
           currencies = Methods.createCurrencyObject(currencies);
 
           if (!excludedSteamIdSet.has(steamid)) {
-            // Normalised once, not once per excluded description.
+            // Normalised once, not once per excluded description. The gate
+            // stays on the raw value: whitespace-only details normalise to ""
+            // and must still pass, as they always have.
             const normalisedDetails = listingDetails
               ? listingDetails.normalize('NFKD').toLowerCase().trim()
-              : null;
+              : '';
             if (
-              normalisedDetails &&
+              listingDetails &&
               !excludedDescriptionPatterns.some((pattern) => pattern.test(normalisedDetails))
             ) {
               try {

@@ -42,7 +42,10 @@ function loadPricelist(callback) {
 
       const bySku = new Map();
       for (const item of parsed.items || []) {
-        bySku.set(item.sku, item);
+        // First entry wins, matching the linear scan this replaced.
+        if (!bySku.has(item.sku)) {
+          bySku.set(item.sku, item);
+        }
       }
       // The raw text is kept instead of the parsed object so GET / can stream
       // the file straight back without re-serialising it on every request.
