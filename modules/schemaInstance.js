@@ -76,7 +76,7 @@ function validateItemName(name) {
 
 
 // A sku is "<defindex>;<quality>" plus optional suffixes such as
-// ";uncraftable", ";australium", ";kt-3" or ";u<effect>".
+// ";uncraftable", ";australium", ";kt-3", ";u<effect>" or ";c<series>".
 const SKU_PATTERN = /^\d+;\d+(?:;[^;\s]+)*$/;
 
 function looksLikeSku(value) {
@@ -84,12 +84,65 @@ function looksLikeSku(value) {
 }
 
 /**
- * Check a sku against the TF2 schema and resolve the name the websocket feed
- * will use for it.
+ * Build the name the listing feed uses for a sku, from the schema item.
+ *
+ * Deliberately does not use schema.getName(): with a cached schema it returns
+ * the same wrong string for every sku ("null RGL.gg - Amateur Participant -
+ * 6v6"), which would rename every watchlist entry to that. Reconstructing the
+ * two forms we can be sure of is worth more than a call that silently lies.
+ *
+ * Returns null when the sku carries quality or attribute prefixes we cannot
+ * rebuild ("Strange", "Australium", killstreak tiers, unusual effects).
+ * Callers must treat null as "cannot say", never as "no such item".
+ */
+function displayNameForSku(sku, item) {
+  const base = item && (item.item_name || item.name);
+  if (!base) {
+    return null;
+  }
+
+  const parts = String(sku).split(';');
+
+  // Crate series: "Abominable Cosmetic Case" + series 107 -> "... #107".
+  const crate = parts.find((p) => /^c\d+$/.test(p));
+  if (crate) {
+    return `${base} #${crate.slice(1)}`;
+  }
+
+  // Plain Unique, no attributes: the only variation is the "The " prefix,
+  // which the schema records as proper_name.
+  if (parts.length === 2 && parts[1] === '6') {
+    return item.proper_name ? `The ${base}` : base;
+  }
+
+  return null;
+}
+
+function hasSchema() {
+  const schema = getSchemaManager()?.schema;
+  return Boolean(schema && typeof schema.getItemBySKU === 'function');
+}
+
+// Returns the schema item, or null when the sku matches nothing. Callers must
+// check hasSchema() separately: "schema not loaded" and "no such item" need
+// different answers, and conflating them reported unknown skus as an outage.
+function schemaItemForSku(sku) {
+  if (!hasSchema()) {
+    return null;
+  }
+  try {
+    return getSchemaManager().schema.getItemBySKU(sku) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check a sku against the TF2 schema and resolve the name the feed will use.
  *
  * Returns { ok: true, sku, matchedName } for a real item, or
- * { ok: false, reason }. As with validateItemName, an unloaded schema returns
- * ok with `unverified: true` rather than blocking the user.
+ * { ok: false, reason }. An unloaded schema returns ok with
+ * `unverified: true` and no name, which callers must handle.
  */
 function validateItemSku(sku) {
   const trimmed = String(sku).trim();
@@ -97,67 +150,44 @@ function validateItemSku(sku) {
     return { ok: false, reason: `"${trimmed}" is not a SKU. Expected something like 31628;6.` };
   }
 
-  const schema = getSchemaManager()?.schema;
-  if (!schema || typeof schema.getItemBySKU !== 'function') {
+  if (!hasSchema()) {
     return { ok: true, sku: trimmed, unverified: true };
   }
 
-  let item = null;
-  try {
-    item = schema.getItemBySKU(trimmed);
-  } catch {
-    item = null;
-  }
+  const item = schemaItemForSku(trimmed);
   if (!item) {
     return { ok: false, reason: `No TF2 item matches SKU "${trimmed}".` };
   }
 
-  // The websocket matches on the listing's item name, not its sku, so a sku
-  // add still has to be stored as a name.
-  let name = null;
-  try {
-    if (typeof schema.getName === 'function') name = schema.getName(trimmed, true);
-  } catch {
-    name = null;
-  }
-  if (!name) name = item.item_name || item.name || null;
+  const name = displayNameForSku(trimmed, item);
   if (!name) {
-    return { ok: false, reason: `SKU "${trimmed}" resolved to an item with no usable name.` };
+    return {
+      ok: false,
+      reason: `SKU "${trimmed}" has quality or attribute parts this cannot name reliably. Add it by name instead.`,
+    };
   }
-
-  // Normalise through the name path so the "The " handling stays in one place.
-  const viaName = validateItemName(name);
-  if (viaName.ok && viaName.matchedName) name = viaName.matchedName;
 
   return { ok: true, sku: trimmed, matchedName: name };
 }
 
-
 /**
- * The name the listing feed will actually use for this item, or null if the
- * name resolves to nothing.
+ * Work out the name the feed will send for an existing watchlist entry.
  *
- * backpack.tf builds listing names from the schema, so an entry stored under
- * any other spelling can never match — "Nanobalaclava" against the schema's
- * "The Nanobalaclava" being the usual case. validateItemName deliberately
- * accepts both forms so a user can type either; this resolves which one the
- * feed will send.
+ * `resolved` false means the name matches no schema item at all. `resolved`
+ * true with a null `canonical` means the item exists but its canonical form
+ * cannot be determined — callers must leave those alone rather than treating
+ * them as broken.
  */
 function canonicalItemName(name) {
   const check = validateItemName(name);
   if (!check.ok || !check.sku) {
-    return null;
+    return { resolved: false, canonical: null };
   }
-  const schema = getSchemaManager()?.schema;
-  if (schema && typeof schema.getName === 'function') {
-    try {
-      const proper = schema.getName(check.sku, true);
-      if (proper) return proper;
-    } catch {
-      // fall through to the matched candidate
-    }
+  const item = schemaItemForSku(check.sku);
+  if (!item) {
+    return { resolved: false, canonical: null };
   }
-  return check.matchedName || null;
+  return { resolved: true, canonical: displayNameForSku(check.sku, item) };
 }
 
 module.exports = {
@@ -167,6 +197,5 @@ module.exports = {
   validateItemSku,
   looksLikeSku,
   canonicalItemName,
+  displayNameForSku,
 };
-
-

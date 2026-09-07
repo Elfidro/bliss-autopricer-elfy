@@ -320,15 +320,18 @@ module.exports = function (app, config, configManager) {
       let keep = 0;
 
       for (const entry of itemList.items) {
-        const canonical = canonicalItemName(entry.name);
-        if (!canonical) {
+        const info = canonicalItemName(entry.name);
+        if (!info.resolved) {
           remove.push({ name: entry.name, reason: 'no matching item in the schema' });
-        } else if (canonical === entry.name) {
+        } else if (!info.canonical || info.canonical === entry.name) {
+          // Already canonical, or a form whose canonical name cannot be
+          // rebuilt (quality or attribute prefixes). Leave it rather than
+          // guess — a wrong rename is worse than an entry we cannot judge.
           keep++;
-        } else if (present.has(canonical)) {
-          remove.push({ name: entry.name, reason: `duplicate of "${canonical}"` });
+        } else if (present.has(info.canonical)) {
+          remove.push({ name: entry.name, reason: `duplicate of "${info.canonical}"` });
         } else {
-          rename.push({ from: entry.name, to: canonical });
+          rename.push({ from: entry.name, to: info.canonical });
         }
       }
 
