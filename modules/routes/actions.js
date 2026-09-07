@@ -313,7 +313,11 @@ module.exports = function (app, config, configManager) {
       const dryRun = req.body.dryRun === 'true' || req.body.dryRun === true;
       const paths = getBotPaths();
       const itemList = loadJson(paths.itemListPath);
-      const present = new Set(itemList.items.map((i) => i.name));
+      // Names that exist now, plus any a rename is about to create. Without
+      // tracking the second kind, two entries that canonicalise to the same
+      // name (" The Nanobalaclava" and "Nanobalaclava" both becoming "The
+      // Nanobalaclava") would each be renamed and produce a duplicate.
+      const claimed = new Set(itemList.items.map((i) => i.name));
 
       const remove = [];
       const rename = [];
@@ -328,10 +332,11 @@ module.exports = function (app, config, configManager) {
           // rebuilt (quality or attribute prefixes). Leave it rather than
           // guess — a wrong rename is worse than an entry we cannot judge.
           keep++;
-        } else if (present.has(info.canonical)) {
+        } else if (claimed.has(info.canonical)) {
           remove.push({ name: entry.name, reason: `duplicate of "${info.canonical}"` });
         } else {
           rename.push({ from: entry.name, to: info.canonical });
+          claimed.add(info.canonical);
         }
       }
 
