@@ -2,7 +2,13 @@
 const path = require('path');
 const { exec } = require('child_process');
 const { loadJson, saveJson } = require('../utils');
-const { validateItemName, validateItemSku, looksLikeSku } = require('../schemaInstance');
+const {
+  validateItemName,
+  validateItemSku,
+  looksLikeSku,
+  canonicalItemName,
+  getSchemaManager,
+} = require('../schemaInstance');
 
 module.exports = function (app, config, configManager) {
   // Helper function to get current bot paths
@@ -277,6 +283,85 @@ module.exports = function (app, config, configManager) {
         : res.redirect(`/?imported=${encodeURIComponent(summary)}`);
     } catch (error) {
       console.error('Error importing bot pricelist:', error);
+      return fail(500, error.message);
+    }
+  });
+
+  // Watchlist entries are matched against the listing feed by exact name, so
+  // an entry the schema does not recognise — or one spelled differently from
+  // the canonical name — collects nothing and sits Unpriced forever. This
+  // finds those and either corrects the spelling or drops the entry.
+  //
+  // Send dryRun=true to get the plan without applying it; the UI previews
+  // before asking for confirmation, because this deletes entries.
+  app.post('/clean-watchlist', (req, res) => {
+    const wantsJson = !String(req.get('accept') || '').includes('text/html');
+    const fail = (status, message) => {
+      if (wantsJson) {
+        return res.status(status).json({ ok: false, error: message });
+      }
+      return res.redirect(`/?addError=${encodeURIComponent(message)}`);
+    };
+
+    // Without a schema every entry looks invalid, which would wipe the whole
+    // watchlist. Refuse rather than destroy it.
+    if (!getSchemaManager()?.schema) {
+      return fail(503, 'Schema not loaded yet, so valid entries cannot be told from invalid ones. Try again shortly.');
+    }
+
+    try {
+      const dryRun = req.body.dryRun === 'true' || req.body.dryRun === true;
+      const paths = getBotPaths();
+      const itemList = loadJson(paths.itemListPath);
+      const present = new Set(itemList.items.map((i) => i.name));
+
+      const remove = [];
+      const rename = [];
+      let keep = 0;
+
+      for (const entry of itemList.items) {
+        const canonical = canonicalItemName(entry.name);
+        if (!canonical) {
+          remove.push({ name: entry.name, reason: 'no matching item in the schema' });
+        } else if (canonical === entry.name) {
+          keep++;
+        } else if (present.has(canonical)) {
+          remove.push({ name: entry.name, reason: `duplicate of "${canonical}"` });
+        } else {
+          rename.push({ from: entry.name, to: canonical });
+        }
+      }
+
+      if (dryRun) {
+        return res.json({ ok: true, dryRun: true, keep, remove, rename });
+      }
+
+      if (remove.length === 0 && rename.length === 0) {
+        const msg = 'Watchlist is already clean.';
+        return wantsJson ? res.json({ ok: true, keep, remove, rename }) : res.redirect(`/?imported=${encodeURIComponent(msg)}`);
+      }
+
+      const removeSet = new Set(remove.map((r) => r.name));
+      const renameMap = new Map(rename.map((r) => [r.from, r.to]));
+      itemList.items = itemList.items
+        .filter((i) => !removeSet.has(i.name))
+        .map((i) => (renameMap.has(i.name) ? { ...i, name: renameMap.get(i.name) } : i));
+
+      saveJson(paths.itemListPath, itemList);
+
+      console.log(
+        `Watchlist cleanup: ${keep} unchanged, ${rename.length} renamed, ${remove.length} removed`
+      );
+      rename.forEach((r) => console.log(`  renamed "${r.from}" -> "${r.to}"`));
+      remove.forEach((r) => console.log(`  removed "${r.name}" (${r.reason})`));
+
+      const summary =
+        `Watchlist cleaned: ${rename.length} renamed, ${remove.length} removed, ${keep} unchanged.`;
+      return wantsJson
+        ? res.json({ ok: true, keep, remove, rename })
+        : res.redirect(`/?imported=${encodeURIComponent(summary)}`);
+    } catch (error) {
+      console.error('Error cleaning watchlist:', error);
       return fail(500, error.message);
     }
   });

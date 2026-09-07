@@ -132,5 +132,41 @@ function validateItemSku(sku) {
   return { ok: true, sku: trimmed, matchedName: name };
 }
 
-module.exports = { setSchemaManager, getSchemaManager, validateItemName, validateItemSku, looksLikeSku };
+
+/**
+ * The name the listing feed will actually use for this item, or null if the
+ * name resolves to nothing.
+ *
+ * backpack.tf builds listing names from the schema, so an entry stored under
+ * any other spelling can never match — "Nanobalaclava" against the schema's
+ * "The Nanobalaclava" being the usual case. validateItemName deliberately
+ * accepts both forms so a user can type either; this resolves which one the
+ * feed will send.
+ */
+function canonicalItemName(name) {
+  const check = validateItemName(name);
+  if (!check.ok || !check.sku) {
+    return null;
+  }
+  const schema = getSchemaManager()?.schema;
+  if (schema && typeof schema.getName === 'function') {
+    try {
+      const proper = schema.getName(check.sku, true);
+      if (proper) return proper;
+    } catch {
+      // fall through to the matched candidate
+    }
+  }
+  return check.matchedName || null;
+}
+
+module.exports = {
+  setSchemaManager,
+  getSchemaManager,
+  validateItemName,
+  validateItemSku,
+  looksLikeSku,
+  canonicalItemName,
+};
+
 

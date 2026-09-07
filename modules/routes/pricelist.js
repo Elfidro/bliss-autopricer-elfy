@@ -476,6 +476,53 @@ module.exports = function (app, config, configManager) {
             <button type="submit" class="btn btn-secondary">⇪ Import from bot pricelist</button>
             <span style="font-size: 0.84rem; color: var(--text-dim); margin-left: 10px;">Adds anything the bot trades that is not tracked yet, matched by SKU</span>
           </form>
+          <div style="margin-top: 10px;">
+            <button type="button" class="btn btn-danger" onclick="cleanWatchlist()">🧹 Clean up watchlist</button>
+            <span style="font-size: 0.84rem; color: var(--text-dim); margin-left: 10px;">Corrects names the feed will never match, and drops entries with no matching item</span>
+          </div>
+          <script>
+            async function cleanWatchlist() {
+              var NL = String.fromCharCode(10);
+              var plan;
+              try {
+                var resp = await fetch('/clean-watchlist', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+                  body: 'dryRun=true'
+                });
+                plan = await resp.json();
+              } catch (e) {
+                alert('Could not check the watchlist: ' + e.message);
+                return;
+              }
+              if (!plan.ok) {
+                alert('Could not check the watchlist: ' + plan.error);
+                return;
+              }
+              if (!plan.rename.length && !plan.remove.length) {
+                alert('Watchlist is already clean - all ' + plan.keep + ' entries match a schema item.');
+                return;
+              }
+              var msg = '';
+              if (plan.rename.length) {
+                msg += 'RENAME (' + plan.rename.length + '):' + NL;
+                msg += plan.rename.map(function (r) { return '   ' + r.from + '   ->   ' + r.to; }).join(NL);
+                msg += NL + NL;
+              }
+              if (plan.remove.length) {
+                msg += 'REMOVE (' + plan.remove.length + '):' + NL;
+                msg += plan.remove.map(function (r) { return '   ' + r.name + '   (' + r.reason + ')'; }).join(NL);
+                msg += NL + NL;
+              }
+              msg += plan.keep + ' entries unchanged.' + NL + NL + 'Apply these changes?';
+              if (!confirm(msg)) return;
+              var f = document.createElement('form');
+              f.method = 'POST';
+              f.action = '/clean-watchlist';
+              document.body.appendChild(f);
+              f.submit();
+            }
+          </script>
         </div>
       `;
 
