@@ -60,8 +60,25 @@ class BotDiscovery {
       }
     }
 
+    // Several search paths resolve to the same installation — '../tf2autobot'
+    // from the pricer's working directory and $HOME/tf2autobot are both
+    // /root/tf2autobot on a typical droplet. Without collapsing them here every
+    // bot inside is discovered once per alias, which is how duplicate entries
+    // with identical ids ended up in the config. realpath also folds symlinks.
+    const unique = [
+      ...new Set(
+        found.map((p) => {
+          try {
+            return fs.realpathSync(p);
+          } catch {
+            return path.resolve(p);
+          }
+        })
+      ),
+    ];
+
     // Validate that these are actually tf2autobot installations
-    this.tf2autobotPaths = found.filter((dir) => this.isTf2AutobotInstallation(dir));
+    this.tf2autobotPaths = unique.filter((dir) => this.isTf2AutobotInstallation(dir));
     return this.tf2autobotPaths;
   }
 

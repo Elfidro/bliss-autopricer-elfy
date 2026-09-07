@@ -132,7 +132,9 @@ module.exports = function (app, configManager) {
           html += `<a href="/bot-config/select?id=${encodeURIComponent(bot.id)}" class="btn-icon-action act-add" style="margin-right: 6px;">Select Bot</a>`;
         }
 
-        if (bot.source === 'manual') {
+        // Any bot that is not the active one can be removed, not just manually
+        // added ones — discovered duplicates need removing too.
+        if (!isSelected) {
           html += `<a href="/bot-config/remove?id=${encodeURIComponent(bot.id)}" class="btn-icon-action act-remove" onclick="return confirm('Remove this bot configuration?')">✕ Remove</a>`;
         }
 

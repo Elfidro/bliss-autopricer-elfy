@@ -28,7 +28,7 @@ class ConfigManager {
           return this.migrateOldConfig(config);
         }
 
-        return config;
+        return this.dedupeBots(config);
       }
     } catch (err) {
       console.warn('Error loading config, creating new one:', err.message);
@@ -36,6 +36,44 @@ class ConfigManager {
 
     // Create new config with auto-discovery
     return this.createConfigWithDiscovery();
+  }
+
+  /**
+   * Collapse bot entries that point at the same pricelist.
+   *
+   * A discovery bug added the same installation once per search-path alias, and
+   * because the id is derived from the path those duplicates share an id too —
+   * so they cannot be told apart in the UI or removed individually. Identity
+   * here is the pricelist path, which is what actually distinguishes a bot.
+   * @param config
+   */
+  dedupeBots(config) {
+    if (!config || !Array.isArray(config.bots)) {
+      return config;
+    }
+
+    const seen = new Set();
+    const kept = [];
+    const dropped = [];
+
+    for (const bot of config.bots) {
+      const identity = bot.pricelistPath || bot.steamId || bot.id;
+      if (identity && seen.has(identity)) {
+        dropped.push(bot);
+        continue;
+      }
+      if (identity) seen.add(identity);
+      kept.push(bot);
+    }
+
+    if (dropped.length > 0) {
+      console.log(`🧹 Removed ${dropped.length} duplicate bot entr(ies) from the config:`);
+      dropped.forEach((b) => console.log(`   ${b.name || b.id} -> ${b.pricelistPath}`));
+      config.bots = kept;
+      this.saveConfig(config);
+    }
+
+    return config;
   }
 
   /**
@@ -228,6 +266,9 @@ class ConfigManager {
           enabled: true,
           source: 'discovery',
         });
+        // Track it immediately: the set was built before the loop, so without
+        // this two identical bots in the same discovery run both get added.
+        existingBots.add(identifier);
         addedCount++;
         console.log(`✅ Added discovered bot: ${bot.name} (${bot.steamId})`);
       }

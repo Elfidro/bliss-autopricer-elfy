@@ -215,16 +215,52 @@ module.exports = function (app, config, configManager) {
     };
 
     try {
-      const paths = getBotPaths();
-      const botPricelist = loadJson(paths.sellingPricelistPath);
-      const entries = Object.entries(botPricelist || {}).filter(
-        ([, v]) => v && typeof v === 'object'
-      );
+      // Every configured bot, not just the selected one: the pricer serves all
+      // of them, so anything any bot trades needs watching. Paths are deduped
+      // because two config entries can point at the same pricelist.
+      const allBots =
+        typeof configManager.getAllBots === 'function' ? configManager.getAllBots() : [];
+      const selected =
+        typeof configManager.getSelectedBot === 'function' ? configManager.getSelectedBot() : null;
+      const sources = allBots.length > 0 ? allBots : selected ? [selected] : [];
 
-      if (entries.length === 0) {
-        return fail(404, 'The bot pricelist is empty or could not be read.');
+      const seenPath = new Set();
+      const entries = [];
+      const readFrom = [];
+      const unreadable = [];
+
+      for (const bot of sources) {
+        const listPath = bot && bot.pricelistPath;
+        if (!listPath || seenPath.has(listPath)) {
+          continue;
+        }
+        seenPath.add(listPath);
+
+        let contents;
+        try {
+          contents = loadJson(listPath);
+        } catch (err) {
+          unreadable.push(`${bot.name || bot.id}: ${err.message}`);
+          continue;
+        }
+
+        const found = Object.entries(contents || {}).filter(([, v]) => v && typeof v === 'object');
+        if (found.length === 0) {
+          unreadable.push(`${bot.name || bot.id}: empty pricelist`);
+          continue;
+        }
+        readFrom.push(`${bot.name || bot.id} (${found.length})`);
+        entries.push(...found);
       }
 
+      if (entries.length === 0) {
+        return fail(
+          404,
+          `No bot pricelist could be read.${unreadable.length ? ' ' + unreadable.join('; ') : ''}`
+        );
+      }
+
+      const paths = getBotPaths();
       const itemList = loadJson(paths.itemListPath);
       const tracked = new Set(itemList.items.map((i) => i.name));
 
@@ -265,21 +301,25 @@ module.exports = function (app, config, configManager) {
       }
 
       const summary =
-        `Imported ${added} item${added === 1 ? '' : 's'} from the bot pricelist` +
+        `Imported ${added} item${added === 1 ? '' : 's'} from ${readFrom.length} bot pricelist${readFrom.length === 1 ? '' : 's'}` +
         ` (${already} already tracked` +
         (unresolved.length ? `, ${unresolved.length} could not be resolved` : '') +
+        (unreadable.length ? `, ${unreadable.length} unreadable` : '') +
         ').';
 
       console.log(
-        `Bot pricelist import: ${entries.length} entries, ${added} added, ` +
-          `${already} already tracked, ${unresolved.length} unresolved`
+        `Bot pricelist import from ${readFrom.join(', ')}: ${entries.length} entries, ` +
+          `${added} added, ${already} already tracked, ${unresolved.length} unresolved`
       );
+      if (unreadable.length) {
+        console.log(`Skipped: ${unreadable.join('; ')}`);
+      }
       if (unresolved.length) {
         console.log(`Unresolved: ${unresolved.slice(0, 20).join(', ')}`);
       }
 
       return wantsJson
-        ? res.json({ ok: true, added, already, unresolved })
+        ? res.json({ ok: true, added, already, unresolved, readFrom, unreadable })
         : res.redirect(`/?imported=${encodeURIComponent(summary)}`);
     } catch (error) {
       console.error('Error importing bot pricelist:', error);
