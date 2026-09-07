@@ -228,6 +228,7 @@ module.exports = function (app, config, configManager) {
     tbl += '<th style="width: 14%; text-align: center;">Buy Price</th>';
     tbl += '<th style="width: 14%; text-align: center;">Sell Price</th>';
     tbl += '<th style="width: 10%; text-align: center;">Age</th>';
+    tbl += '<th style="width: 8%; text-align: center;">Remove</th>';
     tbl += '</tr></thead><tbody>';
 
     rows.forEach((row) => {
@@ -254,6 +255,12 @@ module.exports = function (app, config, configManager) {
       tbl += priced
         ? `<td style="text-align: center;"><span class="badge badge-muted">${(row.age / 3600).toFixed(1)}h</span></td>`
         : '<td style="text-align: center; color: var(--text-dim); font-family: var(--font-mono);">—</td>';
+      tbl += `<td style="text-align: center;">
+                <form method="POST" action="/remove-item" style="display: inline;" onsubmit="return confirm('Stop tracking this item?\\n\\nThe websocket stops collecting listings for it. Any price it already has is kept.');">
+                  <input type="hidden" name="name" value="${esc(row.name)}">
+                  <button type="submit" class="btn-icon-action act-remove" title="Remove from watchlist">✕</button>
+                </form>
+              </td>`;
       tbl += '</tr>';
     });
 
@@ -365,6 +372,8 @@ module.exports = function (app, config, configManager) {
       // Result of the last /add-item
       if (req.query.addError) {
         html += `<div class="flash flash-error"><span>⚠️</span> ${esc(req.query.addError)}</div>`;
+      } else if (req.query.removed) {
+        html += `<div class="flash flash-ok"><span>🗑️</span> Removed "<strong>${esc(req.query.removed)}</strong>" from the watchlist.</div>`;
       } else if (req.query.added) {
         html += `<div class="flash flash-ok"><span>✅</span> Added "<strong>${esc(req.query.added)}</strong>" to the watchlist.</div>`;
       }
@@ -454,11 +463,11 @@ module.exports = function (app, config, configManager) {
               <span>➕</span> Add Item to Tracker
             </h3>
             <span style="font-size: 0.84rem; color: var(--text-dim);">
-              Adds item to item_list.json so the background websocket collects listings
+              Accepts an item name or a SKU. Adds to item_list.json so the websocket collects listings
             </span>
           </div>
           <form method="POST" action="/add-item" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <input type="text" name="name" placeholder="Enter item name (e.g. 'Scattergun', 'Tour of Duty Ticket', 'Strange Rocket Launcher')" required style="flex: 1; min-width: 280px;">
+            <input type="text" name="name" placeholder="Item name or SKU (e.g. 'Tour of Duty Ticket', 'Bald Spotter', 31628;6)" required style="flex: 1; min-width: 280px;">
             <button type="submit" class="btn btn-success">+ Add to Watchlist</button>
           </form>
         </div>

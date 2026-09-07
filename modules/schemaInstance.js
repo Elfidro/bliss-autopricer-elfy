@@ -74,4 +74,63 @@ function validateItemName(name) {
   return { ok: false, reason: `"${trimmed}" is not a recognised TF2 item.` };
 }
 
-module.exports = { setSchemaManager, getSchemaManager, validateItemName };
+
+// A sku is "<defindex>;<quality>" plus optional suffixes such as
+// ";uncraftable", ";australium", ";kt-3" or ";u<effect>".
+const SKU_PATTERN = /^\d+;\d+(?:;[^;\s]+)*$/;
+
+function looksLikeSku(value) {
+  return SKU_PATTERN.test(String(value).trim());
+}
+
+/**
+ * Check a sku against the TF2 schema and resolve the name the websocket feed
+ * will use for it.
+ *
+ * Returns { ok: true, sku, matchedName } for a real item, or
+ * { ok: false, reason }. As with validateItemName, an unloaded schema returns
+ * ok with `unverified: true` rather than blocking the user.
+ */
+function validateItemSku(sku) {
+  const trimmed = String(sku).trim();
+  if (!looksLikeSku(trimmed)) {
+    return { ok: false, reason: `"${trimmed}" is not a SKU. Expected something like 31628;6.` };
+  }
+
+  const schema = getSchemaManager()?.schema;
+  if (!schema || typeof schema.getItemBySKU !== 'function') {
+    return { ok: true, sku: trimmed, unverified: true };
+  }
+
+  let item = null;
+  try {
+    item = schema.getItemBySKU(trimmed);
+  } catch {
+    item = null;
+  }
+  if (!item) {
+    return { ok: false, reason: `No TF2 item matches SKU "${trimmed}".` };
+  }
+
+  // The websocket matches on the listing's item name, not its sku, so a sku
+  // add still has to be stored as a name.
+  let name = null;
+  try {
+    if (typeof schema.getName === 'function') name = schema.getName(trimmed, true);
+  } catch {
+    name = null;
+  }
+  if (!name) name = item.item_name || item.name || null;
+  if (!name) {
+    return { ok: false, reason: `SKU "${trimmed}" resolved to an item with no usable name.` };
+  }
+
+  // Normalise through the name path so the "The " handling stays in one place.
+  const viaName = validateItemName(name);
+  if (viaName.ok && viaName.matchedName) name = viaName.matchedName;
+
+  return { ok: true, sku: trimmed, matchedName: name };
+}
+
+module.exports = { setSchemaManager, getSchemaManager, validateItemName, validateItemSku, looksLikeSku };
+
