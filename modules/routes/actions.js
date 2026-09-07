@@ -191,6 +191,96 @@ module.exports = function (app, config, configManager) {
     }
   });
 
+  // Copy everything the bot trades into the watchlist, so the pricer is
+  // actually collecting listings for the items it is expected to price.
+  //
+  // The bot's pricelist is keyed by sku and each entry also carries a name,
+  // but the name can be stale while the sku is authoritative — so resolve
+  // through the schema and fall back to the stored name only if that fails.
+  // The watchlist itself is matched by name (bptfWebSocket compares
+  // item.name), so a sku that resolves to nothing cannot be imported.
+  app.post('/import-bot-pricelist', (req, res) => {
+    const wantsJson = !String(req.get('accept') || '').includes('text/html');
+    const fail = (status, message) => {
+      if (wantsJson) {
+        return res.status(status).json({ ok: false, error: message });
+      }
+      return res.redirect(`/?addError=${encodeURIComponent(message)}`);
+    };
+
+    try {
+      const paths = getBotPaths();
+      const botPricelist = loadJson(paths.sellingPricelistPath);
+      const entries = Object.entries(botPricelist || {}).filter(
+        ([, v]) => v && typeof v === 'object'
+      );
+
+      if (entries.length === 0) {
+        return fail(404, 'The bot pricelist is empty or could not be read.');
+      }
+
+      const itemList = loadJson(paths.itemListPath);
+      const tracked = new Set(itemList.items.map((i) => i.name));
+
+      let added = 0;
+      let already = 0;
+      const unresolved = [];
+
+      for (const [key, entry] of entries) {
+        const sku = entry.sku || key;
+        let resolved = null;
+
+        const bySku = validateItemSku(sku);
+        if (bySku.ok && bySku.matchedName) {
+          resolved = bySku.matchedName;
+        } else if (entry.name) {
+          // Schema does not know the sku (crate series, unusual effects and
+          // similar); the stored name is the only thing left to try.
+          const byName = validateItemName(entry.name);
+          if (byName.ok && byName.matchedName) resolved = byName.matchedName;
+        }
+
+        if (!resolved) {
+          unresolved.push(entry.name || sku);
+          continue;
+        }
+        if (tracked.has(resolved)) {
+          already++;
+          continue;
+        }
+
+        itemList.items.push({ name: resolved });
+        tracked.add(resolved);
+        added++;
+      }
+
+      if (added > 0) {
+        saveJson(paths.itemListPath, itemList);
+      }
+
+      const summary =
+        `Imported ${added} item${added === 1 ? '' : 's'} from the bot pricelist` +
+        ` (${already} already tracked` +
+        (unresolved.length ? `, ${unresolved.length} could not be resolved` : '') +
+        ').';
+
+      console.log(
+        `Bot pricelist import: ${entries.length} entries, ${added} added, ` +
+          `${already} already tracked, ${unresolved.length} unresolved`
+      );
+      if (unresolved.length) {
+        console.log(`Unresolved: ${unresolved.slice(0, 20).join(', ')}`);
+      }
+
+      return wantsJson
+        ? res.json({ ok: true, added, already, unresolved })
+        : res.redirect(`/?imported=${encodeURIComponent(summary)}`);
+    } catch (error) {
+      console.error('Error importing bot pricelist:', error);
+      return fail(500, error.message);
+    }
+  });
+
   app.post('/bot/edit', (req, res) => {
     try {
       const { sku, min, max } = req.body;

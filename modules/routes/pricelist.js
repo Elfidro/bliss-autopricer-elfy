@@ -372,6 +372,8 @@ module.exports = function (app, config, configManager) {
       // Result of the last /add-item
       if (req.query.addError) {
         html += `<div class="flash flash-error"><span>⚠️</span> ${esc(req.query.addError)}</div>`;
+      } else if (req.query.imported) {
+        html += `<div class="flash flash-ok"><span>⇪</span> ${esc(req.query.imported)}</div>`;
       } else if (req.query.removed) {
         html += `<div class="flash flash-ok"><span>🗑️</span> Removed "<strong>${esc(req.query.removed)}</strong>" from the watchlist.</div>`;
       } else if (req.query.added) {
@@ -469,6 +471,10 @@ module.exports = function (app, config, configManager) {
           <form method="POST" action="/add-item" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <input type="text" name="name" placeholder="Item name or SKU (e.g. 'Tour of Duty Ticket', 'Bald Spotter', 31628;6)" required style="flex: 1; min-width: 280px;">
             <button type="submit" class="btn btn-success">+ Add to Watchlist</button>
+          </form>
+          <form method="POST" action="/import-bot-pricelist" style="margin-top: 10px;" onsubmit="return confirm('Copy every item from the bot pricelist into the watchlist?\\n\\nThe websocket will start collecting listings for all of them. Nothing is removed.');">
+            <button type="submit" class="btn btn-secondary">⇪ Import from bot pricelist</button>
+            <span style="font-size: 0.84rem; color: var(--text-dim); margin-left: 10px;">Adds anything the bot trades that is not tracked yet, matched by SKU</span>
           </form>
         </div>
       `;
