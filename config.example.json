@@ -16,6 +16,12 @@
     "buy": 20,
     "sell": -25
   },
+  "baselineCheck": {
+    "skipWhenListingsAtLeast": {
+      "buy": 5,
+      "sell": 3
+    }
+  },
   "minSellMargin": 0.11,
   "minSellMarginPercent": 0.03,
   "hatPriceRef": 1.33,

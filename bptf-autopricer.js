@@ -1055,15 +1055,18 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
     }
 
     var usePrices = false;
+    // With a deep market (enough independent bids and asks) the listings are
+    // the price. The bptf community value often lags by months, and letting it
+    // veto a well-supported market price froze items at stale prices. The
+    // baseline check stays for thin markets, where a few listings could mislead.
+    const deep = config.baselineCheck?.skipWhenListingsAtLeast || { buy: 5, sell: 3 };
+    const deepMarket = buyFiltered.length >= deep.buy && sellFiltered.length >= deep.sell;
     try {
       // Will return true or false. True if we are ok with the autopricers price, false if we are not.
       // We use prices.tf as a baseline.
-      usePrices = Methods.calculatePricingAPIDifferences(
-        pricetfItem,
-        final_buyObj,
-        final_sellObj,
-        keyobj
-      );
+      usePrices =
+        deepMarket ||
+        Methods.calculatePricingAPIDifferences(pricetfItem, final_buyObj, final_sellObj, keyobj);
     } catch (e) {
       // Create an error object with a message detailing this difference.
       throw new Error(`| UPDATING PRICES |: Our autopricer determined that name ${name} should sell for : ${final_sellObj.keys} keys and 

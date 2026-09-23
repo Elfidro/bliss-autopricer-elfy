@@ -21,6 +21,11 @@ const DEFAULTS = {
     buy: 20,
     sell: -25,
   },
+  // The band above is only applied to thin markets; with at least this many
+  // bids and asks the market price is used as is.
+  baselineCheck: {
+    skipWhenListingsAtLeast: { buy: 5, sell: 3 },
+  },
   alwaysQuerySnapshotAPI: false,
   fallbackOntoPricesTf: false,
   excludedSteamIDs: [],
