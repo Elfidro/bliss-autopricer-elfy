@@ -13,13 +13,17 @@
   "pricerPort": 3456,
   "minListingCount": 3,
   "maxPercentageDifferences": {
-    "buy": 5,
-    "sell": -8
+    "buy": 20,
+    "sell": -25
   },
   "minSellMargin": 0.11,
+  "minSellMarginPercent": 0.03,
+  "hatPriceRef": 1.33,
+  "ownBotSteamIDs": [],
   "priceSwingLimits": {
     "maxBuyIncrease": 0.1,
-    "maxSellDecrease": 0.1
+    "maxSellDecrease": 0.1,
+    "confirmCycles": 4
   },
   "alwaysQuerySnapshotAPI": true,
   "usePriceDbFallback": true,
@@ -142,7 +146,8 @@
   },
   "priceWithoutSellListings": {
     "enabled": true,
-    "sellMarginRef": 5
+    "sellMarginRef": 0.22,
+    "sellMarginPercent": 0.1
   },
   "lowValuePricing": {
     "thresholdRef": 5,

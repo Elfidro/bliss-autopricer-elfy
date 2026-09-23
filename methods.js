@@ -152,6 +152,10 @@ Methods.prototype.getItemPriceFromExternalPricelist = function (
   let value = priceObj.value;
   if (priceObj.currency === 'keys') {
     value = value * keyPrice;
+  } else if (priceObj.currency === 'hat') {
+    // backpack.tf prices many craft hats in "hats". Reading that as metal
+    // made a 1 hat item look like it was worth 1 ref.
+    value = value * (Number(getConfig().hatPriceRef) || 1.33);
   }
 
   // Calculate buy/sell with ±10% offset

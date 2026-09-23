@@ -176,7 +176,17 @@ function initBptfWebSocket({
   // listing, and a fresh stringified array of every blocked attribute value per
   // attribute of every listing. At backpack.tf's event rate that was the single
   // largest source of short-lived garbage in the process.
-  const excludedSteamIdSet = new Set(excludedSteamIds || []);
+  // Our own bots list at prices this pricer produced; feeding those back in
+  // makes the pricer chase its own output.
+  const excludedSteamIdSet = new Set([...(excludedSteamIds || []), ...(config?.ownBotSteamIDs || [])]);
+  // Attributes that make a listing a different item from the base one, whatever
+  // their value: paint (142, 261), Halloween spells (1004-1009) and strange parts
+  // (379-385). Matching on paint *values* alone missed "any paint" buy orders,
+  // which carry the paint attribute with no colour and were polluting the buy
+  // side (e.g. 20 ref "any painted" orders on 1.33 ref hats).
+  const blockedDefindexes = new Set(
+    (config?.blockedAttributeDefindexes || [142, 261, 1004, 1005, 1006, 1007, 1008, 1009, 379, 380, 381, 382, 383, 384, 385]).map(Number)
+  );
   const excludedDescriptionPatterns = (excludedListingDescriptions || []).map(
     (detail) => new RegExp(`\\b${detail}\\b`, 'i')
   );
@@ -232,19 +242,26 @@ function initBptfWebSocket({
             return;
           }
 
+          if (
+            listingItemObject.attributes &&
+            !blockedAttributeNames.some((key) => response_item.name.includes(key)) &&
+            listingItemObject.attributes.some(
+              (attribute) => typeof attribute === 'object' && blockedDefindexes.has(Number(attribute.defindex))
+            )
+          ) {
+            return;
+          }
+
           currencies = Methods.createCurrencyObject(currencies);
 
           if (!excludedSteamIdSet.has(steamid)) {
-            // Normalised once, not once per excluded description. The gate
-            // stays on the raw value: whitespace-only details normalise to ""
-            // and must still pass, as they always have.
+            // Normalised once, not once per excluded description. Listings with
+            // no description at all are kept: plenty of bots (Gladiator.tf among
+            // them) post none, and dropping them thinned the market data.
             const normalisedDetails = listingDetails
               ? listingDetails.normalize('NFKD').toLowerCase().trim()
               : '';
-            if (
-              listingDetails &&
-              !excludedDescriptionPatterns.some((pattern) => pattern.test(normalisedDetails))
-            ) {
+            if (!excludedDescriptionPatterns.some((pattern) => pattern.test(normalisedDetails))) {
               try {
                 var sku = schemaManager.schema.getSkuFromName(response_item.name);
                 if (sku === null || sku === undefined) {

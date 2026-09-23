@@ -29,6 +29,8 @@ const {
 } = require('./modules/keyPriceUtils');
 
 const { updateMovingAverages, updateListingStats } = require('./modules/listingAverages');
+const { recordStatus, shortReason } = require('./modules/pricingStatus');
+const { recordAccuracy } = require('./modules/marketAccuracy');
 
 const {
   getListings,
@@ -82,6 +84,9 @@ const blockedAttributes = config.blockedAttributes;
 const fallbackOntoPricesTf = config.fallbackOntoPricesTf;
 
 const updatedSkus = new Set();
+
+// sku -> consecutive cycles a price move has been held back by the swing guard.
+const swingStreaks = new Map();
 
 // Create database instance for pg-promise.
 const { db, pgp } = require('./modules/dbInstance');
@@ -406,14 +411,19 @@ const calculateAndEmitPrices = async () => {
             (item.buy.keys === 0 && item.buy.metal === 0) ||
             (item.sell.keys === 0 && item.sell.metal === 0)
           ) {
+            recordStatus(name, 'error', 'Buy or sell side came out as zero');
             return;
           }
 
           itemsToWrite.push(item);
           priceHistoryEntries.push(result.priceHistory);
           emitQueue.enqueue(item);
+          if (!result.swingConfirmed) {
+            recordStatus(name, 'updated', result.note || '');
+          }
         } catch (e) {
           console.log("Couldn't create a price for " + name + ' due to: ' + e.message);
+          recordStatus(name, 'rejected', shortReason(e.message));
         }
       })
     )
@@ -449,6 +459,13 @@ const calculateAndEmitPrices = async () => {
       sell_metal: e.sell,
     }));
     await db.none(pgp.helpers.insert(values, cs) + ' ON CONFLICT DO NOTHING');
+  }
+
+  // Score the fresh pricelist against the live market for the dashboard.
+  try {
+    await recordAccuracy(db);
+  } catch (err) {
+    console.error('Could not record pricer accuracy:', err.message);
   }
 };
 
@@ -791,57 +808,33 @@ const determinePrice = async (name, sku) => {
     throw e;
   }
 
-  // Sort buyListings into descending order of price.
-  var buyFiltered = buyListings.rows.sort((a, b) => {
-    let valueA = Methods.toMetal(a.currencies, keyobj.metal);
-    let valueB = Methods.toMetal(b.currencies, keyobj.metal);
-
-    return valueB - valueA;
-  });
+  // Listings are ordered by price. Trusted steam ids only break ties: moving
+  // them to the front regardless of price made the pricer average a trusted
+  // bot's low bid, or copy a trusted bot's high ask, over the real market.
+  const priceOf = (l) => Methods.toMetal(l.currencies, keyobj.metal);
+  const trustRank = (l) => (prioritySteamIds.includes(l.steamid) ? 0 : 1);
+  const ownIds = new Set(config.ownBotSteamIDs || []);
 
   // May be empty when priceWithoutSellListings is on — the sell price is then
   // derived from the buy price in getAverages.
-  const sellRows = sellListings?.rows || [];
+  const sellRows = (sellListings?.rows || []).filter((l) => !ownIds.has(l.steamid));
 
-  // Sort sellListings into ascending order of price.
-  var sellFiltered = sellRows.sort((a, b) => {
-    let valueA = Methods.toMetal(a.currencies, keyobj.metal);
-    let valueB = Methods.toMetal(b.currencies, keyobj.metal);
+  // Ascending: cheapest ask first.
+  var sellFiltered = sellRows.sort((a, b) => priceOf(a) - priceOf(b) || trustRank(a) - trustRank(b));
 
-    return valueA - valueB;
-  });
-
-  // We prioritise using listings from bots in our prioritySteamIds list.
-  // I.e., we move listings by those trusted steam ids to the front of the
-  // array, to be used as a priority over any others.
-
-  buyFiltered = buyListings.rows.sort((a, b) => {
-    // Custom sorting logic to prioritize specific Steam IDs
-    const aIsPrioritized = prioritySteamIds.includes(a.steamid);
-    const bIsPrioritized = prioritySteamIds.includes(b.steamid);
-
-    if (aIsPrioritized && !bIsPrioritized) {
-      return -1; // a comes first
-    } else if (!aIsPrioritized && bIsPrioritized) {
-      return 1; // b comes first
-    } else {
-      return 0; // maintain the original order (no priority)
-    }
-  });
-
-  sellFiltered = sellRows.sort((a, b) => {
-    // Custom sorting logic to prioritize specific Steam IDs
-    const aIsPrioritized = prioritySteamIds.includes(a.steamid);
-    const bIsPrioritized = prioritySteamIds.includes(b.steamid);
-
-    if (aIsPrioritized && !bIsPrioritized) {
-      return -1; // a comes first
-    } else if (!aIsPrioritized && bIsPrioritized) {
-      return 1; // b comes first
-    } else {
-      return 0; // maintain the original order (no priority)
-    }
-  });
+  // Descending: best bid first. A buy order above the lowest sell listing is
+  // not a bid for this item — nobody would pay more than an instant-buy price —
+  // it is for a painted/spelled/parted variant the listing filter did not catch.
+  // Keeping those inflated the buy average and was the main reason prices were
+  // rejected as "buying for too much".
+  // With 3+ asks the second cheapest is used, so one mispriced sell listing
+  // cannot wipe out every real bid.
+  const lowestAsk = sellFiltered.length
+    ? priceOf(sellFiltered[sellFiltered.length >= 3 ? 1 : 0])
+    : Infinity;
+  var buyFiltered = buyListings.rows
+    .filter((l) => !ownIds.has(l.steamid) && priceOf(l) <= lowestAsk)
+    .sort((a, b) => priceOf(b) - priceOf(a) || trustRank(a) - trustRank(b));
 
   try {
     // If the buyFiltered or sellFiltered arrays are empty, we throw an error.
@@ -871,11 +864,16 @@ const filterOutliers = (listingsArray) => {
 
   // Filter out listings that are 3 standard deviations away from the mean.
   // To put it plainly, we're filtering out listings that are paying either
-  // too little or too much compared to the mean.
-  const filteredListings = listingsArray.filter((listing) => {
-    const zScore = calculateZScore(Methods.toMetal(listing.currencies, keyobj.metal), mean, stdDev);
-    return zScore <= 3 && zScore >= -3;
-  });
+  // too little or too much compared to the mean. When every listing has the
+  // same price there is nothing to filter (and the z-score would divide by
+  // zero, which used to throw and leave the item unpriced).
+  const filteredListings =
+    stdDev === 0
+      ? listingsArray
+      : listingsArray.filter((listing) => {
+          const zScore = calculateZScore(Methods.toMetal(listing.currencies, keyobj.metal), mean, stdDev);
+          return zScore <= 3 && zScore >= -3;
+        });
 
   if (filteredListings.length < 3) {
     throw new Error('Not enough listings after filtering outliers.');
@@ -917,9 +915,10 @@ async function getSellPriceOutlierChecker(sku, threshold = 3) {
   const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
   const stdDev = Math.sqrt(prices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / prices.length);
 
-  // If stddev is 0 (all prices the same), only allow exact match
+  // If stddev is 0 (all prices the same), allow anything within 15% of it.
+  // An exact-match rule flagged every real market move as an outlier.
   if (stdDev === 0) {
-    return (candidateSellMetal) => candidateSellMetal !== mean;
+    return (candidateSellMetal) => Math.abs(candidateSellMetal - mean) > mean * 0.15;
   }
 
   return (candidateSellMetal) => Math.abs((candidateSellMetal - mean) / stdDev) > threshold;
@@ -939,40 +938,21 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
   try {
     if (buyFiltered.length < 3) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough buy listings...`);
-    } else if (buyFiltered.length > 3 && buyFiltered.length < 10) {
-      // For keys (5021;6), we need to handle the averaging differently
+    } else if (buyFiltered.length < 10) {
+      // 3-9 listings: mean of the top 3 bids, averaged in metal. (Exactly 3 used
+      // to fall through to the outlier filter, which cannot work on 3 points;
+      // and keys/metal were averaged separately with the keys truncated, so
+      // bids of 1 key, 2 keys and 1 key averaged to 1 key.)
+      let totalMetal = 0;
+      for (let i = 0; i <= 2; i++) {
+        totalMetal += Methods.toMetal(buyFiltered[i].currencies, keyobj.metal);
+      }
+      const meanMetal = totalMetal / 3;
       if (sku === '5021;6') {
-        // Convert each listing to pure metal first, then average
-        let totalMetal = 0;
-        for (let i = 0; i <= 2; i++) {
-          totalMetal += Methods.toMetal(buyFiltered[i].currencies, keyobj.metal);
-        }
-        final_buyObj = {
-          keys: 0,
-          metal: totalMetal / 3,
-        };
-        console.log(`DEBUG: Key buy price (3-9 listings) - keys: 0, metal: ${totalMetal / 3}`);
+        final_buyObj = { keys: 0, metal: meanMetal };
       } else {
-        // For other items, average keys and metal separately
-        var totalValue = {
-          keys: 0,
-          metal: 0,
-        };
-        // If there are more than 3 buy listings, we take the first 3 and calculate the mean average price.
-        for (let i = 0; i <= 2; i++) {
-          // If the keys or metal value is undefined, we set it to 0.
-          totalValue.keys += Object.is(buyFiltered[i].currencies.keys, undefined)
-            ? 0
-            : buyFiltered[i].currencies.keys;
-          // If the metal value is undefined, we set it to 0.
-          totalValue.metal += Object.is(buyFiltered[i].currencies.metal, undefined)
-            ? 0
-            : buyFiltered[i].currencies.metal;
-        }
-        final_buyObj = {
-          keys: Math.trunc(totalValue.keys / 3),
-          metal: totalValue.metal / 3,
-        };
+        const keys = Math.trunc(meanMetal / keyobj.metal);
+        final_buyObj = { keys, metal: Methods.getRight(meanMetal - keys * keyobj.metal) };
       }
     } else {
       // Filter out outliers from set, and calculate a mean average price in terms of metal value.
@@ -1038,8 +1018,13 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
       // stocking it. Replaced by a real average as soon as sell listings
       // arrive. The maxPercentageDifferences.sell guard below still applies,
       // so a placeholder that undercuts the bptf baseline is rejected.
-      const marginRef = Number(config.priceWithoutSellListings.sellMarginRef) || 5;
       const buyInMetal = Methods.toMetal(final_buyObj, keyobj.metal);
+      // buy + max(flat ref, percent of buy). A flat 5 ref turned 1 ref hats into
+      // 6 ref sell prices that never sold.
+      const marginRef = Math.max(
+        Number(config.priceWithoutSellListings.sellMarginRef) || 0.22,
+        Methods.getRight(buyInMetal * (Number(config.priceWithoutSellListings.sellMarginPercent) || 0.1))
+      );
 
       // A flat margin only makes sense below a key. At or above that, the margin
       // is a rounding error against the item's value, so fall back to the normal
@@ -1188,47 +1173,39 @@ const finalisePrice = async (arr, name, sku, prevBySku = null) => {
       arr[1].keys = clamp(arr[1].keys, bounds.minSellKeys, bounds.maxSellKeys);
       arr[1].metal = clamp(arr[1].metal, bounds.minSellMetal, bounds.maxSellMetal);
 
-      // A sell price at or below the buy price is never usable. Fall back to
-      // the same buy + margin rule used when there are no sell listings, rather
-      // than the single scrap minSellMargin allows.
+      // A sell price at or below the buy price means the market is tight (the
+      // best bids meet the lowest ask). The ask is the real market price, so
+      // keep selling there and pull the buy price down under it by a margin.
+      // The old rule did the opposite - kept the buy and set sell = buy + 5 ref -
+      // which priced most cheap items at several times their value.
       const minSellMargin = config.minSellMargin ?? 0.11;
-      const fallbackMargin = Math.max(
-        Number(config.priceWithoutSellListings?.sellMarginRef) || 5,
-        minSellMargin
-      );
       var buyInMetal = Methods.toMetal(arr[0], keyobj.metal);
       var sellInMetal = Methods.toMetal(arr[1], keyobj.metal);
+      let note = '';
 
       if (buyInMetal >= sellInMetal) {
-        const targetSell = Methods.getRight(buyInMetal + fallbackMargin);
-        console.log(
-          `| UPDATING PRICES |: ${name} sell (${sellInMetal} ref) was not above buy ` +
-            `(${buyInMetal} ref) — using buy + ${fallbackMargin} ref instead.`
+        const margin = Math.max(
+          minSellMargin,
+          Methods.getRight(sellInMetal * (Number(config.minSellMarginPercent) || 0.03))
         );
-
-        // For keys, always use pure metal format
-        if (sku === '5021;6') {
-          item.buy = {
-            keys: 0,
-            metal: Methods.getRight(arr[0].metal),
-          };
-          item.sell = {
-            keys: 0,
-            metal: targetSell,
-          };
-        } else {
-          // buy + margin can cross a key, so normalise instead of bolting the
-          // margin onto the metal component and leaving keys untouched.
-          const sellKeys = Math.trunc(targetSell / keyobj.metal);
-          item.buy = {
-            keys: arr[0].keys,
-            metal: Methods.getRight(arr[0].metal),
-          };
-          item.sell = {
-            keys: sellKeys,
-            metal: Methods.getRight(targetSell - sellKeys * keyobj.metal),
-          };
+        const targetBuy = Methods.getRight(sellInMetal - margin);
+        if (!(targetBuy > 0)) {
+          throw new Error(`Sell ${sellInMetal} ref leaves no room for a buy price.`);
         }
+        note = `Tight market: buy lowered to ask − ${margin} ref`;
+        console.log(
+          `| UPDATING PRICES |: ${name} buy (${buyInMetal} ref) was not below sell ` +
+            `(${sellInMetal} ref) — buying at ${targetBuy} ref instead.`
+        );
+        const buyKeys = Math.trunc(targetBuy / keyobj.metal);
+        item.buy = {
+          keys: buyKeys,
+          metal: Methods.getRight(targetBuy - buyKeys * keyobj.metal),
+        };
+        item.sell = {
+          keys: arr[1].keys,
+          metal: Methods.getRight(arr[1].metal),
+        };
       } else {
         // For keys, always use pure metal format
         if (sku === '5021;6') {
@@ -1259,19 +1236,36 @@ const finalisePrice = async (arr, name, sku, prevBySku = null) => {
         : JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8')).items.find((i) => i.sku === sku);
 
       // Only check if previous price exists (skip price swing check for keys)
+      let swingConfirmed = false;
       if (prev && sku !== '5021;6') {
         const prevObj = { buy: prev.buy, sell: prev.sell };
         const nextObj = { buy: item.buy, sell: item.sell };
         const swingOk = await isPriceSwingAcceptable(prevObj, nextObj, sku);
         if (!swingOk) {
-          console.log(`Price swing too large for ${name} (${sku}), skipping update.`);
-          return;
+          // The guard stops one-cycle spikes. A move that is still there after
+          // confirmCycles consecutive cycles is the market, not a spike - without
+          // this an item whose price really moved stayed frozen forever, since
+          // the history it is compared against only updates on acceptance.
+          const needed = Number(config.priceSwingLimits?.confirmCycles) || 4;
+          const streak = (swingStreaks.get(sku) || 0) + 1;
+          if (streak < needed) {
+            swingStreaks.set(sku, streak);
+            console.log(`Price swing too large for ${name} (${sku}), holding (${streak}/${needed}).`);
+            recordStatus(name, 'swing-held', `Large move, confirming ${streak}/${needed}`);
+            return;
+          }
+          console.log(`Price swing for ${name} (${sku}) persisted ${streak} cycles, accepting.`);
+          recordStatus(name, 'swing-confirmed', `Large move accepted after ${streak} cycles`);
+          swingConfirmed = true;
         }
+        swingStreaks.delete(sku);
       }
 
       // Save to price history
       return {
         item,
+        note,
+        swingConfirmed,
         priceHistory: {
           sku,
           buy: Methods.toMetal(item.buy, keyobj.metal),
@@ -1279,8 +1273,9 @@ const finalisePrice = async (arr, name, sku, prevBySku = null) => {
         },
       };
     }
-  } catch {
+  } catch (err) {
     // If the autopricer failed to price the item, we don't update the items price.
+    recordStatus(name, 'error', shortReason(err?.message));
     return;
   }
 };
