@@ -1280,8 +1280,61 @@ module.exports = function renderPage(title, bodyContent) {
           link.classList.add('active');
         }
       });
+
+      // 3. Collapsible table sections. Clicking a section header toggles it;
+      // the choice is remembered per page and section. Sections with more than
+      // 50 rows start collapsed so long tables do not bury the rest of the page.
+      var containers = document.querySelectorAll('.table-container');
+      containers.forEach(function (box) {
+        var header = box.querySelector(':scope > .table-header-bar');
+        if (!header) return;
+        var title = header.querySelector('h3');
+        var name = (title ? title.textContent : header.textContent).replace(/\\(\\d+\\)/g, '').trim();
+        var key = 'bliss-collapse:' + currentPath + ':' + name;
+        var rows = box.querySelectorAll('tbody tr').length;
+
+        var chevron = document.createElement('span');
+        chevron.className = 'tc-chevron';
+        chevron.setAttribute('aria-hidden', 'true');
+        chevron.textContent = '▾';
+        header.appendChild(chevron);
+        header.classList.add('tc-toggle');
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+
+        function apply(collapsed) {
+          box.classList.toggle('tc-collapsed', collapsed);
+          header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        var saved = null;
+        try { saved = localStorage.getItem(key); } catch (e) {}
+        apply(saved === null ? rows > 50 : saved === '1');
+
+        function toggle() {
+          var collapsed = !box.classList.contains('tc-collapsed');
+          apply(collapsed);
+          try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
+        }
+        header.addEventListener('click', function (e) {
+          if (e.target.closest('a, button, input, select, textarea, label, form')) return;
+          toggle();
+        });
+        header.addEventListener('keydown', function (e) {
+          if (e.target !== header) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+      });
     })();
   </script>
+  <style>
+    .table-header-bar.tc-toggle { cursor: pointer; user-select: none; }
+    .table-header-bar.tc-toggle:hover { background: var(--surface-hover); }
+    .tc-chevron { margin-left: auto; padding-left: 16px; font-size: 1.1rem; color: var(--text-muted);
+      transition: transform 0.15s ease; }
+    .table-container.tc-collapsed > :not(.table-header-bar) { display: none !important; }
+    .table-container.tc-collapsed > .table-header-bar { border-bottom: none; }
+    .table-container.tc-collapsed .tc-chevron { transform: rotate(-90deg); }
+  </style>
 </body>
 </html>`;
 };
