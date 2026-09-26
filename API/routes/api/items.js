@@ -2,6 +2,7 @@ const fs = require('fs');
 const express = require('express');
 
 const router = express.Router();
+const pricePolicy = require('../../../modules/pricePolicy');
 
 const PRICELIST_PATH = './files/pricelist.json';
 const ITEM_LIST_PATH = './files/item_list.json';
@@ -42,6 +43,7 @@ function loadPricelist(callback) {
 
       const bySku = new Map();
       for (const item of parsed.items || []) {
+        if (!item || typeof item !== 'object') continue;
         // First entry wins, matching the linear scan this replaced.
         if (!bySku.has(item.sku)) {
           bySku.set(item.sku, item);
@@ -49,7 +51,7 @@ function loadPricelist(callback) {
       }
       // The raw text is kept instead of the parsed object so GET / can stream
       // the file straight back without re-serialising it on every request.
-      pricelistCache = { mtimeMs: stats.mtimeMs, size: stats.size, raw, bySku };
+      pricelistCache = { mtimeMs: stats.mtimeMs, size: stats.size, raw, parsed, bySku };
       return callback(null, pricelistCache);
     });
   });
@@ -64,7 +66,8 @@ router.get('/:sku', async (req, res) => {
 
     const item = cache.bySku.get(req.params.sku);
     if (item) {
-      return res.status(200).json(item);
+      // Stock-aware adjustments apply on the way out, same as on the socket.
+      return res.status(200).json(pricePolicy.apply(item));
     }
     // Item was not found in the pricelist.
     return res.sendStatus(404);
@@ -79,7 +82,11 @@ router.get('/', (req, res) => {
       return res.status(400).json({ error: 'Failed to load pricelist.' });
     }
 
-    // Send pricelist to requester.
+    // Send pricelist to requester. The raw text is streamed back unless a
+    // stock policy is active, in which case the adjusted items are serialised.
+    if (pricePolicy.hasAdjustments()) {
+      return res.status(200).json({ ...cache.parsed, items: pricePolicy.applyAll(cache.parsed.items || []) });
+    }
     return res.status(200).type('application/json').send(cache.raw);
   });
 });

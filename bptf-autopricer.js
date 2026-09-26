@@ -24,6 +24,20 @@ const EmitQueue = require('./modules/emitQueue');
 const emitQueue = new EmitQueue(socketIO, 5); // 5ms between emits
 emitQueue.start();
 
+// Stock-aware adjustments (see modules/pricePolicy.js). Everything that goes
+// out to the bots passes through here; the stored pricelist stays at market.
+const pricePolicy = require('./modules/pricePolicy');
+const PRICE_POLICY_PATH = './files/price-policy.json';
+pricePolicy.init({ path: PRICE_POLICY_PATH, methods: Methods, config });
+const rawEnqueue = emitQueue.enqueue.bind(emitQueue);
+emitQueue.enqueue = (item) => {
+  const adjusted = pricePolicy.apply(item);
+  if (adjusted !== item) {
+    console.log(`[POLICY] ${item.name || item.sku}: ${pricePolicy.describe(item.sku)} -> buy ${adjusted.buy.keys}k ${adjusted.buy.metal} / sell ${adjusted.sell.keys}k ${adjusted.sell.metal}`);
+  }
+  rawEnqueue(adjusted);
+};
+
 const {
   fetchKeyPriceFromPriceDB,
 } = require('./modules/keyPriceUtils');
@@ -1294,6 +1308,33 @@ process.on('SIGINT', () => {
 });
 
 listen();
+
+// When the policy file changes, push the affected SKUs to the bots at once
+// from the stored market prices, instead of waiting for the next pricing
+// cycle. SKUs that left the policy are re-emitted too, so they fall back to
+// market.
+pricePolicy.watch((skus) => {
+  let stored;
+  try {
+    stored = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8')).items || [];
+  } catch (err) {
+    console.error('[POLICY] could not read pricelist for re-emit:', err.message);
+    return;
+  }
+  const bySku = new Map();
+  for (const entry of stored) if (!bySku.has(entry.sku)) bySku.set(entry.sku, entry);
+  let sent = 0;
+  for (const sku of skus) {
+    const entry = bySku.get(sku);
+    if (!entry) {
+      console.log(`[POLICY] ${sku} changed but is not in the pricelist; nothing to re-emit`);
+      continue;
+    }
+    emitQueue.enqueue({ ...entry, time: Math.floor(Date.now() / 1000) });
+    sent++;
+  }
+  console.log(`[POLICY] policy changed for ${skus.length} SKU(s), re-emitted ${sent}`);
+});
 
 const { getSCMPriceObject, toMarketHashName } = require('./modules/scmPriceCalculator');
 

@@ -138,5 +138,6 @@ pricerConfig.json.*.backup
 # Runtime state, recreated by the app on startup
 files/item_list.json
 files/pricelist.json
+files/price-policy.json
 bptf-prices.json
 cached-pricelist.json
