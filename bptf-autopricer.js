@@ -28,7 +28,14 @@ emitQueue.start();
 // out to the bots passes through here; the stored pricelist stays at market.
 const pricePolicy = require('./modules/pricePolicy');
 const PRICE_POLICY_PATH = './files/price-policy.json';
-pricePolicy.init({ path: PRICE_POLICY_PATH, methods: Methods, config });
+// The schema gives item grades for the sell floors; the key price converts
+// key-priced items to metal for the spread rule (keyobj is set once the key
+// price has been fetched, later in this file).
+pricePolicy.init({
+  path: PRICE_POLICY_PATH, methods: Methods, config,
+  getSchema: () => schemaManager.schema,
+  getKeyMetal: () => (keyobj ? keyobj.metal : null),
+});
 const rawEnqueue = emitQueue.enqueue.bind(emitQueue);
 emitQueue.enqueue = (item) => {
   const adjusted = pricePolicy.apply(item);
@@ -1317,8 +1324,8 @@ listen();
 // When the policy file changes, push the affected SKUs to the bots at once
 // from the stored market prices, instead of waiting for the next pricing
 // cycle. SKUs that left the policy are re-emitted too, so they fall back to
-// market.
-pricePolicy.watch((skus) => {
+// market. A change to the global rules (skus === null) re-emits everything.
+pricePolicy.watch((changed) => {
   let stored;
   try {
     stored = JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8')).items || [];
@@ -1328,6 +1335,8 @@ pricePolicy.watch((skus) => {
   }
   const bySku = new Map();
   for (const entry of stored) if (!bySku.has(entry.sku)) bySku.set(entry.sku, entry);
+  const skus = changed === null ? [...bySku.keys()] : changed;
+  if (changed === null) console.log(`[POLICY] global rules changed; re-emitting all ${skus.length} items`);
   let sent = 0;
   for (const sku of skus) {
     const entry = bySku.get(sku);
