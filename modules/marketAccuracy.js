@@ -3,14 +3,17 @@
 // without polling backpack.tf.
 //
 // For each priced item:
-//   bid = highest buy order, ignoring buy orders priced above the lowest sell
-//         listing (those are for painted/spelled variants, not the base item)
-//   ask = lowest sell listing
+//   ask = the market ask: the lowest sell listing, or the next one up when the
+//         lowest is an isolated undercut (chooseAskIndex, the same rule the
+//         pricer sells by)
+//   bid = highest buy order at or below the ask (buy orders above it are for
+//         painted/spelled variants, not the base item)
 // and the pricer's buy/sell are judged against them.
 
 const fs = require('fs');
 const path = require('path');
 const { getBaseConfigManager } = require('./baseConfigManager');
+const { chooseAskIndex } = require('./marketPrice');
 
 const PRICELIST_PATH = path.resolve(__dirname, '../files/pricelist.json');
 
@@ -22,14 +25,18 @@ const r2 = (x) => Math.round(x * 100) / 100;
 const sellTolerance = (ask) => Math.max(0.11, ask * 0.03);
 const buyTolerance = (bid) => Math.max(0.22, bid * 0.05);
 
+// Strict comparisons on purpose: in a locked market (bid == ask, common when
+// a buying bot and a selling bot will not trade with each other) the pricer
+// has to sit on one side or the other, so buying at the bid or selling at the
+// ask is on the market, not over/under it.
 function classify(row) {
   if (row.bid == null || row.ask == null) {
     return 'no-market';
   }
-  if (row.buy >= row.ask) {
+  if (row.buy > row.ask) {
     return 'overpay';
   }
-  if (row.sell <= row.bid) {
+  if (row.sell < row.bid) {
     return 'underprice';
   }
   const sellHigh = row.sell > row.ask + sellTolerance(row.ask);
@@ -78,7 +85,8 @@ async function computeAccuracy(db) {
       continue;
     }
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
-    const ask = m.sell.length ? Math.min(...m.sell) : null;
+    const asks = m.sell.slice().sort((a, b) => a - b);
+    const ask = asks.length ? asks[chooseAskIndex(asks, config.isolatedAskGap)] : null;
     const buys = ask == null ? m.buy : m.buy.filter((p) => p <= ask);
     const bid = buys.length ? Math.max(...buys) : null;
     const row = {

@@ -41,6 +41,10 @@ const DEFAULTS = {
   // Our own bots. Their listings are ignored as market data and left out of the
   // dashboard's market numbers.
   ownBotSteamIDs: [],
+  // The lowest sell listing is the market ask unless it is an isolated
+  // undercut: more than this fraction below the next ask, with at least two
+  // asks above it. Then the next ask is used (modules/marketPrice.js).
+  isolatedAskGap: 0.25,
   priceSwingLimits: {
     maxBuyIncrease: 0.1,
     maxSellDecrease: 0.1,

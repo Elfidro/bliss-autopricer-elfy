@@ -26,6 +26,7 @@
   "minSellMarginPercent": 0.03,
   "hatPriceRef": 1.33,
   "ownBotSteamIDs": [],
+  "isolatedAskGap": 0.25,
   "priceSwingLimits": {
     "maxBuyIncrease": 0.1,
     "maxSellDecrease": 0.1,

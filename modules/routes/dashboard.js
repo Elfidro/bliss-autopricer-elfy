@@ -8,12 +8,12 @@ const { getStatus } = require('../pricingStatus');
 
 // What each market state means, in the order the filter chips show them.
 const STATES = {
-  overpay: { label: 'Overpaying', badge: 'danger', help: 'Buy price is at or above the lowest ask' },
-  underprice: { label: 'Underpriced', badge: 'danger', help: 'Sell price is at or below the best bid' },
+  overpay: { label: 'Overpaying', badge: 'danger', help: 'Buy price is above the market ask' },
+  underprice: { label: 'Underpriced', badge: 'danger', help: 'Sell price is below the best bid' },
   'too-wide': { label: 'Too wide', badge: 'warn', help: 'Sell above the ask and buy under the bid' },
-  'sell-high': { label: 'Sell high', badge: 'warn', help: 'Sell more than 3% above the lowest ask' },
+  'sell-high': { label: 'Sell high', badge: 'warn', help: 'Sell more than 3% above the market ask' },
   'buy-low': { label: 'Buy low', badge: 'warn', help: 'Buy more than 5% under the best bid' },
-  ok: { label: 'On market', badge: 'ok', help: 'Buy near the best bid, sell near the lowest ask' },
+  ok: { label: 'On market', badge: 'ok', help: 'Buy near the best bid, sell near the market ask' },
   'no-market': { label: 'No market', badge: 'muted', help: 'Not enough live listings to judge' },
 };
 

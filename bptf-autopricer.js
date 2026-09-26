@@ -31,6 +31,7 @@ const {
 const { updateMovingAverages, updateListingStats } = require('./modules/listingAverages');
 const { recordStatus, shortReason } = require('./modules/pricingStatus');
 const { recordAccuracy } = require('./modules/marketAccuracy');
+const { chooseAskIndex } = require('./modules/marketPrice');
 
 const {
   getListings,
@@ -822,23 +823,22 @@ const determinePrice = async (name, sku) => {
   // Ascending: cheapest ask first.
   var sellFiltered = sellRows.sort((a, b) => priceOf(a) - priceOf(b) || trustRank(a) - trustRank(b));
 
-  // Descending: best bid first. A buy order above the lowest sell listing is
-  // not a bid for this item — nobody would pay more than an instant-buy price —
-  // it is for a painted/spelled/parted variant the listing filter did not catch.
-  // Keeping those inflated the buy average and was the main reason prices were
+  // The ask we sell at. Not always the very lowest: see chooseAskIndex.
+  const askIndex = chooseAskIndex(sellFiltered.map(priceOf), config.isolatedAskGap);
+  const marketAsk = sellFiltered.length ? priceOf(sellFiltered[askIndex]) : Infinity;
+
+  // Descending: best bid first. A buy order above the ask is not a bid for
+  // this item — nobody would pay more than an instant-buy price — it is for a
+  // painted/spelled/parted variant the listing filter did not catch. Keeping
+  // those inflated the buy average and was the main reason prices were
   // rejected as "buying for too much".
-  // With 3+ asks the second cheapest is used, so one mispriced sell listing
-  // cannot wipe out every real bid.
-  const lowestAsk = sellFiltered.length
-    ? priceOf(sellFiltered[sellFiltered.length >= 3 ? 1 : 0])
-    : Infinity;
   var buyFiltered = buyListings.rows
-    .filter((l) => !ownIds.has(l.steamid) && priceOf(l) <= lowestAsk)
+    .filter((l) => !ownIds.has(l.steamid) && priceOf(l) <= marketAsk)
     .sort((a, b) => priceOf(b) - priceOf(a) || trustRank(a) - trustRank(b));
 
   try {
     // If the buyFiltered or sellFiltered arrays are empty, we throw an error.
-    let arr = await getAverages(name, buyFiltered, sellFiltered, sku, pricetfItem);
+    let arr = await getAverages(name, buyFiltered, sellFiltered, sku, pricetfItem, askIndex);
     return arr;
   } catch (e) {
     throw new Error(e);
@@ -895,36 +895,9 @@ const filterOutliers = (listingsArray) => {
   return filteredMean;
 };
 
-// Fetch a sku's recent sell history once and return a synchronous predicate.
-//
-// The caller tests every sell listing in turn until one is not an outlier; the
-// history it compares against is the same for all of them, so the old
-// per-candidate isSellPriceOutlier ran the identical query (and rebuilt the
-// identical result set) once per listing.
-async function getSellPriceOutlierChecker(sku, threshold = 3) {
-  // Fetch last 10 sell prices from history
-  const history = await db.any(
-    'SELECT sell_metal FROM price_history WHERE sku = $1 ORDER BY timestamp DESC LIMIT 10',
-    [sku]
-  );
-  if (history.length < 3) {
-    return () => false;
-  } // Not enough data to judge
-
-  const prices = history.map((p) => Number(p.sell_metal));
-  const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
-  const stdDev = Math.sqrt(prices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / prices.length);
-
-  // If stddev is 0 (all prices the same), allow anything within 15% of it.
-  // An exact-match rule flagged every real market move as an outlier.
-  if (stdDev === 0) {
-    return (candidateSellMetal) => Math.abs(candidateSellMetal - mean) > mean * 0.15;
-  }
-
-  return (candidateSellMetal) => Math.abs((candidateSellMetal - mean) / stdDev) > threshold;
-}
-
-const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) => {
+// askIndex: which of the ascending sellFiltered rows is the market ask (from
+// chooseAskIndex; 0 when not given).
+const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, askIndex = 0) => {
   // Initialise two objects to contain the items final buy and sell prices.
   var final_buyObj = {
     keys: 0,
@@ -978,25 +951,13 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem) =>
         };
       }
     }
-    // Decided to pick the very first sell listing as it's ordered by the lowest sell price. I.e., the most competitive.
-    // However, I decided to prioritise 'trusted' listings by certain steam ids. This may result in a very high sell price, instead
-    // of a competitive one.
+    // Sell at the market ask (the lowest listing, or the next one up when the
+    // lowest is an isolated undercut — see chooseAskIndex). This used to skip
+    // any ask that disagreed with the item's own recent sell prices, which
+    // anchored a wrong price to itself: an item priced at 40 ref kept
+    // rejecting the 1.44 ref asks as outliers for days.
     if (sellFiltered.length > 0) {
-      // Try trusted listings first, but skip if they're outliers
-      let picked = null;
-      const isOutlier = await getSellPriceOutlierChecker(sku);
-      for (let i = 0; i < sellFiltered.length; i++) {
-        const candidate = sellFiltered[i];
-        const candidateMetal = Methods.toMetal(candidate.currencies, keyobj.metal);
-        if (!isOutlier(candidateMetal)) {
-          picked = candidate;
-          break;
-        }
-      }
-      // If all are outliers, fallback to the lowest price anyway (to avoid not pricing at all)
-      if (!picked) {
-        picked = sellFiltered[0];
-      }
+      const picked = sellFiltered[Math.min(askIndex, sellFiltered.length - 1)];
 
       // For keys, the listing currencies should already be in pure metal format (keys: 0, metal: X)
       // For other items, this preserves the key+metal format from the listing
