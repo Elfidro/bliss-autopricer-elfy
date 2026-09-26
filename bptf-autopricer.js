@@ -837,8 +837,13 @@ const determinePrice = async (name, sku) => {
   // Ascending: cheapest ask first.
   var sellFiltered = sellRows.sort((a, b) => priceOf(a) - priceOf(b) || trustRank(a) - trustRank(b));
 
-  // The ask we sell at. Not always the very lowest: see chooseAskIndex.
-  const askIndex = chooseAskIndex(sellFiltered.map(priceOf), config.isolatedAskGap);
+  // The ask we sell at. Not always the very lowest: see chooseAskIndex. Every
+  // bid goes in, including the ones above the asks - the rule ignores those.
+  const bidPrices = buyListings.rows.filter((l) => !ownIds.has(l.steamid)).map(priceOf);
+  const askIndex = chooseAskIndex(sellFiltered.map(priceOf), bidPrices, {
+    gap: config.isolatedAskGap,
+    maxAskToBidRatio: config.maxAskToBidRatio,
+  });
   const marketAsk = sellFiltered.length ? priceOf(sellFiltered[askIndex]) : Infinity;
 
   // Descending: best bid first. A buy order above the ask is not a bid for

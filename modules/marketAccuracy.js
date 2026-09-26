@@ -86,7 +86,11 @@ async function computeAccuracy(db) {
     }
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
     const asks = m.sell.slice().sort((a, b) => a - b);
-    const ask = asks.length ? asks[chooseAskIndex(asks, config.isolatedAskGap)] : null;
+    const askIndex = chooseAskIndex(asks, m.buy, {
+      gap: config.isolatedAskGap,
+      maxAskToBidRatio: config.maxAskToBidRatio,
+    });
+    const ask = asks.length ? asks[askIndex] : null;
     const buys = ask == null ? m.buy : m.buy.filter((p) => p <= ask);
     const bid = buys.length ? Math.max(...buys) : null;
     const row = {

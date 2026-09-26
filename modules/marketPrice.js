@@ -4,7 +4,8 @@
 // accuracy dashboard (what the pricer is judged against), so the two never
 // disagree about where the ask is.
 
-// Index of the ask to price against. `asks` is ascending, in metal.
+// Index of the ask to price against. `asks` is ascending and `bids` is any
+// order, both in metal.
 //
 // The lowest ask is the market price unless it is an isolated undercut: a
 // single listing more than `gap` (a fraction) below the next one, e.g. 1.66 ref
@@ -14,15 +15,33 @@
 // skipped while at least two asks remain above it, so with one or two asks the
 // lowest is always used.
 //
+// The bids decide between "undercut" and "the only honest ask". If the buyers
+// agree with the low ask (the best bid at or under it is close to it) and the
+// next ask up is more than `maxAskToBidRatio` times that bid, the asks above
+// are the outliers, not the one below: Defiant Spartan had eight bids at
+// 1.22-1.33, one ask at 1.33 and two junk asks at 26 and 28 ref. Wet Works, by
+// contrast, had bids at 1.55, one ask at 1.66 and twenty-four at 4.11+, and
+// 4.11 is within three times the bid, so 1.66 is skipped as an undercut.
+//
 // Time-based protection is the price swing guard; this rule only looks at the
 // shape of the current market. It replaced a check that compared each ask to
 // the pricer's own recent sell prices, which anchored a wrong price to itself:
 // once an item sold at 40 ref, the 1.44 ref asks were "outliers" and the one
 // 40 ref listing was not.
-function chooseAskIndex(asks, gap = 0.25) {
-  const g = Number.isFinite(gap) ? gap : 0.25;
+function chooseAskIndex(asks, bids = [], opts = {}) {
+  const gap = Number.isFinite(opts.gap) ? opts.gap : 0.25;
+  const ratio = Number.isFinite(opts.maxAskToBidRatio) ? opts.maxAskToBidRatio : 3;
   let i = 0;
-  while (i < asks.length - 2 && asks[i] < asks[i + 1] * (1 - g)) {
+  while (i < asks.length - 2 && asks[i] < asks[i + 1] * (1 - gap)) {
+    let support = 0;
+    for (const b of bids || []) {
+      if (b <= asks[i] && b > support) {
+        support = b;
+      }
+    }
+    if (support > 0 && asks[i + 1] > support * ratio) {
+      break;
+    }
     i++;
   }
   return i;

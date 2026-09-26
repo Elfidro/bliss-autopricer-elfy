@@ -45,6 +45,11 @@ const DEFAULTS = {
   // undercut: more than this fraction below the next ask, with at least two
   // asks above it. Then the next ask is used (modules/marketPrice.js).
   isolatedAskGap: 0.25,
+  // ...unless the buyers back the low ask: when the best bid at or under it
+  // is within this ratio of the next ask, the next ask is a plausible market;
+  // when the next ask is further above the bid than this, the asks above are
+  // the outliers and the low ask stands.
+  maxAskToBidRatio: 3,
   priceSwingLimits: {
     maxBuyIncrease: 0.1,
     maxSellDecrease: 0.1,
