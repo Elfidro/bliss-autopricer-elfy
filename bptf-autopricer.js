@@ -949,8 +949,15 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, as
     // last price forever - the Winter cosmetic cases sat on buy prices many
     // times the market for days.
     const minBids = sellFiltered.length >= 3 ? 2 : 3;
+    // Nobody bidding but plenty asking is a sell-only market (junk cases: 167
+    // bots selling at a weapon, no buyers). The buy side is then derived from
+    // the ask below, after the ask is picked.
+    let sellOnly = false;
     if (buyFiltered.length < minBids) {
-      throw new Error(`| UPDATING PRICES |: ${name} not enough buy listings...`);
+      if (sellFiltered.length < 3) {
+        throw new Error(`| UPDATING PRICES |: ${name} not enough buy listings...`);
+      }
+      sellOnly = true;
     } else if (buyFiltered.length < 10) {
       // 2-9 listings: mean of the top 3 bids (or both, with two), averaged in
       // metal. (Exactly 3 used to fall through to the outlier filter, which
@@ -1009,6 +1016,36 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, as
       final_sellObj.metal = Object.is(picked.currencies.metal, undefined)
         ? 0
         : picked.currencies.metal;
+
+      if (sellOnly) {
+        // Buy a margin under the ask. Below a weapon the pair cannot be
+        // expressed - tf2autobot needs buy > 0 and sell > buy - so the
+        // smallest legal pair is buy 0.05 / sell 0.11, one weapon over the
+        // market. Anything priced in keys is left unpriced instead: a lone
+        // ask on a key-priced item with no bids is not a market.
+        const askInMetal = Methods.toMetal(final_sellObj, keyobj.metal);
+        if (askInMetal >= keyobj.metal) {
+          throw new Error(
+            `| UPDATING PRICES |: ${name} not enough buy listings (sell-only market at ${askInMetal} ref is too large to price from the ask alone)`
+          );
+        }
+        const pct = Number(config.minSellMarginPercent) || 0.03;
+        const margin = Math.max(config.minSellMargin ?? 0.11, Methods.getRight(askInMetal * pct));
+        let buyInMetal = Methods.getRight(askInMetal - margin);
+        let sellInMetal = askInMetal;
+        if (!(buyInMetal >= 0.05)) {
+          buyInMetal = 0.05;
+          if (sellInMetal <= buyInMetal) {
+            sellInMetal = Methods.getRight(buyInMetal + 0.05);
+          }
+        }
+        final_buyObj = { keys: 0, metal: buyInMetal };
+        final_sellObj = { keys: 0, metal: sellInMetal };
+        console.log(
+          `| UPDATING PRICES |: ${name} has ${buyFiltered.length} bid(s) and ${sellFiltered.length} asks - ` +
+            `sell-only market, buying ${buyInMetal} ref under the ${askInMetal} ref ask, selling ${sellInMetal} ref.`
+        );
+      }
 
       if (sku === '5021;6') {
         console.log(

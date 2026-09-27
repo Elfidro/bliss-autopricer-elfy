@@ -35,6 +35,7 @@
     "ignoreBelowMetal": 0.33
   },
   "alwaysQuerySnapshotAPI": true,
+  "useScmFallback": false,
   "usePriceDbFallback": true,
   "excludedSteamIDs": [
     "76561199384015307",

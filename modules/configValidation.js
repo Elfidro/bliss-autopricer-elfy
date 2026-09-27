@@ -28,6 +28,10 @@ const DEFAULTS = {
   },
   alwaysQuerySnapshotAPI: false,
   fallbackOntoPricesTf: false,
+  // Steam Community Market prices are wallet-dollar prices with no relation
+  // to the backpack.tf market: a case that trades for one weapon on bptf came
+  // back as 0.88 ref. Off unless asked for.
+  useScmFallback: false,
   excludedSteamIDs: [],
   trustedSteamIDs: [],
   excludedListingDescriptions: [],
