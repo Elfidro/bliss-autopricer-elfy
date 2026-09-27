@@ -50,6 +50,7 @@ const GRADE_BY_RARITY = {
 
 let policyPath = null;
 let methods = null;
+let pricerConfig = {};
 let getSchema = () => null;
 let getKeyMetal = () => null;
 let maxAgeMs = 2 * 60 * 60 * 1000;
@@ -63,6 +64,7 @@ let gradeCache = { ig: null, byName: null };
 function init({ path: file, methods: m, config, getSchema: gs, getKeyMetal: gk }) {
   policyPath = file;
   methods = m;
+  pricerConfig = config || {};
   if (typeof gs === 'function') getSchema = gs;
   if (typeof gk === 'function') getKeyMetal = gk;
   const hours = Number(config?.pricePolicy?.maxAgeHours);
@@ -284,11 +286,26 @@ function keepSpread(out, spread, effects) {
 // Returns the item as the bots should see it. Untouched items come back as-is.
 // Order: the SKU's stock adjustments, buy ceilings (group, then grade), the
 // spread, then sell floors (group, then grade) as the last word.
+// What the bots see for the key. tf2autobot values keys a buyer pays with at
+// the key BUY price, and keys it hands out at the key SELL price, so a buy
+// price keyPricing.botBuyDiscountMetal under the market is a fee on paying in
+// keys: a key covers that much less of a metal-priced item. No other rule
+// touches the key - a spread or floor applied to it re-expresses its own
+// price in keys (64.66 ref once became 1 key + 0.11). The stored price, the
+// dashboard and /items/5021;6?market=1 stay at market.
+function applyKey(item) {
+  const discount = Number(pricerConfig.keyPricing && pricerConfig.keyPricing.botBuyDiscountMetal) || 0;
+  if (!(discount > 0) || (item.buy.keys || 0) > 0 || (item.sell.keys || 0) > 0) return item;
+  const buy = round((item.buy.metal || 0) - discount);
+  if (!(buy > 0) || buy >= (item.sell.metal || 0)) return item;
+  const out = { ...item, buy: { keys: 0, metal: buy }, sell: { ...item.sell } };
+  lastEffects.set(item.sku, `key buy ${discount} ref under market (fee on paying in keys)`);
+  return out;
+}
+
 function apply(item) {
   if (!item || !item.sku || !item.buy || !item.sell) return item;
-  // The key is the unit every rule is measured in; a spread or floor applied
-  // to it re-expresses its own price in keys (64.66 ref became 1 key + 0.11).
-  if (item.sku === '5021;6') return item;
+  if (item.sku === '5021;6') return applyKey(item);
   load();
   if (!hasPolicy() || !isFresh()) return item;
   const adj = state.items.get(item.sku) || null;

@@ -67,6 +67,11 @@ router.get('/:sku', async (req, res) => {
     const item = cache.bySku.get(req.params.sku);
     if (item) {
       // Stock-aware adjustments apply on the way out, same as on the socket.
+      // ?market=1 returns the stored market price instead (used by Elora for
+      // the key, which the bots see with a fee applied).
+      if (req.query.market === '1') {
+        return res.status(200).json(item);
+      }
       return res.status(200).json(pricePolicy.apply(item));
     }
     // Item was not found in the pricelist.

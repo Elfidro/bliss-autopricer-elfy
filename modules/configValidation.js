@@ -36,6 +36,10 @@ const DEFAULTS = {
     minBids: 3,
     minAsks: 3,
     maxDeviationFromReference: 0.06,
+    // Key buy price handed to the bots is this many ref under the market
+    // buy, as a fee on customers who pay in keys (tf2autobot values their
+    // keys at the key buy price). 0 = off. The stored price stays at market.
+    botBuyDiscountMetal: 0,
   },
   // Steam Community Market prices are wallet-dollar prices with no relation
   // to the backpack.tf market: a case that trades for one weapon on bptf came
