@@ -239,8 +239,9 @@ const updateKeyObject = async () => {
       metal: key_item.sell.metal,
     };
 
-    // Emit the price update
-    socketIO.emit('price', key_item);
+    // Emit the price update. The key goes out through the policy like every
+    // other item, so the bots get the key-fee buy price (see pricePolicy).
+    socketIO.emit('price', pricePolicy.apply(key_item));
   } catch (error) {
     console.error('Failed to update key price:', error);
     // If we fail, we'll retry on the next scheduled update
