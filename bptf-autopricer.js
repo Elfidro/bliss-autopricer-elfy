@@ -108,7 +108,44 @@ const fallbackOntoPricesTf = config.fallbackOntoPricesTf;
 const updatedSkus = new Set();
 
 // sku -> consecutive cycles a price move has been held back by the swing guard.
-const swingStreaks = new Map();
+// Persisted to disk: the guard needs confirmCycles consecutive holds before it
+// accepts a move, and with the streaks only in memory every restart started
+// the count over. On a day with several deploys an item could stay on a
+// wrong price for hours (The Firestalker sat at 9.22 ref against a 4.11 ref
+// market through five restarts).
+const SWING_STREAKS_PATH = './files/swing-streaks.json';
+const swingStreaks = (() => {
+  const map = new Map();
+  try {
+    const saved = JSON.parse(fs.readFileSync(SWING_STREAKS_PATH, 'utf8'));
+    for (const [sku, n] of Object.entries(saved || {})) {
+      if (Number.isInteger(n) && n > 0) {
+        map.set(sku, n);
+      }
+    }
+  } catch {
+    // No file yet, or unreadable: start empty.
+  }
+  const save = () => {
+    try {
+      fs.writeFileSync(SWING_STREAKS_PATH, JSON.stringify(Object.fromEntries(map)));
+    } catch (err) {
+      console.warn(`Could not save swing streaks: ${err.message}`);
+    }
+  };
+  return {
+    get: (sku) => map.get(sku),
+    set: (sku, n) => {
+      map.set(sku, n);
+      save();
+    },
+    delete: (sku) => {
+      if (map.delete(sku)) {
+        save();
+      }
+    },
+  };
+})();
 
 // Create database instance for pg-promise.
 const { db, pgp } = require('./modules/dbInstance');
