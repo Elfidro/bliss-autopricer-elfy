@@ -82,9 +82,27 @@ function parseSides(r) {
   };
 }
 
+// Flat ref amounts do not scale: +1 ref on a 0.55 ref case triples it while
+// +1 on a 13 ref case is a nudge. Every flat markup is therefore capped at a
+// share of the item's market price: a sell add at maxSellAddPct of the market
+// sell (default 20%), the minimum spread at minSpreadPct (default 10%, never
+// under one weapon). Above the crossover price (flat / pct) the flat amount
+// applies unchanged, so cheap items get a proportional markup and dear ones
+// exactly what was configured.
+const DEFAULT_MAX_SELL_ADD_PCT = 0.2;
+const DEFAULT_MIN_SPREAD_PCT = 0.1;
+const WEAPON = 0.05;
+
+function pctOrDefault(v, dflt) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 && n <= 1 ? n : dflt;
+}
+
 function parseGlobal(g) {
   if (!g || typeof g !== 'object') return null;
   const minSpreadMetal = Math.max(0, Number(g.minSpreadMetal) || 0);
+  const maxSellAddPct = pctOrDefault(g.maxSellAddPct, DEFAULT_MAX_SELL_ADD_PCT);
+  const minSpreadPct = pctOrDefault(g.minSpreadPct, DEFAULT_MIN_SPREAD_PCT);
   const byGrade = new Map();
   const add = (grade, sides) => {
     const name = String(grade || '').trim();
@@ -97,7 +115,23 @@ function parseGlobal(g) {
   for (const r of Array.isArray(g.gradeRules) ? g.gradeRules : []) add(r && r.grade, parseSides(r));
   for (const f of Array.isArray(g.sellFloors) ? g.sellFloors : []) add(f && f.grade, { buyCapMetal: 0, sellFloorMetal: Number(f && f.metal) || 0 });   // older file format
   const gradeRules = [...byGrade.values()];
-  return minSpreadMetal > 0 || gradeRules.length ? { minSpreadMetal, gradeRules } : null;
+  return minSpreadMetal > 0 || gradeRules.length
+    ? { minSpreadMetal, gradeRules, maxSellAddPct, minSpreadPct }
+    : null;
+}
+
+// The largest sell add allowed on an item whose market sell is sellMetal.
+function cappedSellAdd(add, sellMetal, pct) {
+  if (!(add > 0)) return 0;
+  if (!(sellMetal > 0)) return add;
+  return Math.min(add, sellMetal * pct);
+}
+
+// The spread to enforce on an item whose market sell is sellMetal.
+function cappedSpread(spread, sellMetal, pct) {
+  if (!(spread > 0)) return 0;
+  if (!(sellMetal > 0)) return spread;
+  return Math.max(WEAPON, Math.min(spread, sellMetal * pct));
 }
 
 function hasPolicy() {
@@ -259,8 +293,18 @@ function apply(item) {
   if (!adj && !g) return item;
   const out = { ...item, buy: { ...item.buy }, sell: { ...item.sell } };
   const effects = [];
+  // Market sell in metal, the base every percentage cap is taken against.
+  const marketSellMetal = priceToMetal(item.sell, keyMetalNow());
+  const addPct = g ? g.maxSellAddPct : DEFAULT_MAX_SELL_ADD_PCT;
+  const spreadPct = g ? g.minSpreadPct : DEFAULT_MIN_SPREAD_PCT;
   if (adj) {
-    if (adj.sellAddMetal) out.sell.metal = round((out.sell.metal || 0) + adj.sellAddMetal);
+    if (adj.sellAddMetal) {
+      const add = cappedSellAdd(adj.sellAddMetal, marketSellMetal, addPct);
+      out.sell.metal = round((out.sell.metal || 0) + add);
+      if (add < adj.sellAddMetal - 0.005) {
+        effects.push(`sell add capped at ${Math.round(addPct * 100)}% (${round(add)} ref)`);
+      }
+    }
     if (adj.buyDropMetal) out.buy.metal = Math.max(0, round((out.buy.metal || 0) - adj.buyDropMetal));
     if (adj.sellAddMetal || adj.buyDropMetal) effects.push(describeAdjustment({ sellAddMetal: adj.sellAddMetal, buyDropMetal: adj.buyDropMetal, note: adj.note }));
   }
@@ -268,7 +312,7 @@ function apply(item) {
   const gr = grade ? g.gradeRules.find((r) => r.grade.toLowerCase() === grade.toLowerCase()) : null;
   if (adj && adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects, 'group');
   if (gr && gr.buyCapMetal) capBuy(out, gr.buyCapMetal, effects, grade);
-  if (g && g.minSpreadMetal > 0) keepSpread(out, g.minSpreadMetal, effects);
+  if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpread(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
   if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
   if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
   if (!effects.length) return item;
