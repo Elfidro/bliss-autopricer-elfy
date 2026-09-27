@@ -28,6 +28,15 @@ const DEFAULTS = {
   },
   alwaysQuerySnapshotAPI: false,
   fallbackOntoPricesTf: false,
+  // The key is priced from the live backpack.tf book (modules/keyMarketPrice.js)
+  // with pricedb.io as reference and fallback. A listings price further than
+  // maxDeviationFromReference from pricedb.io is refused.
+  keyPricing: {
+    fromListings: true,
+    minBids: 3,
+    minAsks: 3,
+    maxDeviationFromReference: 0.06,
+  },
   // Steam Community Market prices are wallet-dollar prices with no relation
   // to the backpack.tf market: a case that trades for one weapon on bptf came
   // back as 0.88 ref. Off unless asked for.

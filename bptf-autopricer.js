@@ -53,6 +53,7 @@ const { updateMovingAverages, updateListingStats } = require('./modules/listingA
 const { recordStatus, shortReason } = require('./modules/pricingStatus');
 const { recordAccuracy } = require('./modules/marketAccuracy');
 const { chooseAskIndex } = require('./modules/marketPrice');
+const { priceKeyFromListings } = require('./modules/keyMarketPrice');
 
 const {
   getListings,
@@ -191,10 +192,44 @@ let external_pricelist;
 
 const updateKeyObject = async () => {
   try {
-    // Fetch key price directly from pricedb.io
-    const key_item = await fetchKeyPriceFromPriceDB();
+    // pricedb.io is the reference and the fallback; the live backpack.tf
+    // book is the price (modules/keyMarketPrice.js).
+    let reference = null;
+    try {
+      reference = await fetchKeyPriceFromPriceDB();
+    } catch (err) {
+      console.error(`pricedb.io key price unavailable: ${err.message}`);
+    }
+    const market = await priceKeyFromListings({
+      db,
+      config,
+      methods: Methods,
+      chooseAskIndex,
+      reference,
+    });
 
-    console.log(`Key item fetched from pricedb.io: ${JSON.stringify(key_item)}`);
+    let key_item;
+    if (market.buy) {
+      key_item = {
+        name: 'Mann Co. Supply Crate Key',
+        sku: '5021;6',
+        source: 'bptf',
+        time: Math.floor(Date.now() / 1000),
+        buy: { keys: 0, metal: market.buy },
+        sell: { keys: 0, metal: market.sell },
+      };
+      console.log(
+        `Key price from backpack.tf listings: buy ${market.buy} / sell ${market.sell} ref ` +
+          `(${market.nBids} bids, ${market.nAsks} asks` +
+          (reference ? `; pricedb.io ${reference.buy.metal} / ${reference.sell.metal}` : '') +
+          ')'
+      );
+    } else if (reference) {
+      key_item = reference;
+      console.log(`Key price from pricedb.io (listings not usable: ${market.reason})`);
+    } else {
+      throw new Error(`no key price: listings not usable (${market.reason}) and pricedb.io failed`);
+    }
 
     // Add to pricelist
     Methods.addToPricelist(key_item, PRICELIST_PATH);
@@ -207,7 +242,7 @@ const updateKeyObject = async () => {
     // Emit the price update
     socketIO.emit('price', key_item);
   } catch (error) {
-    console.error('Failed to update key price from pricedb.io:', error);
+    console.error('Failed to update key price:', error);
     // If we fail, we'll retry on the next scheduled update
   }
 };
