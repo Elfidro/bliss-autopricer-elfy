@@ -676,11 +676,19 @@ async function isPriceSwingAcceptable(prev, next, sku) {
 
   const maxBuyIncrease = config.priceSwingLimits?.maxBuyIncrease ?? 0.1;
   const maxSellDecrease = config.priceSwingLimits?.maxSellDecrease ?? 0.1;
+  // Cheap items move in whole scrap: one scrap on a 1 ref hat is already 11%,
+  // so a percentage-only guard held every routine one or two scrap move for
+  // confirmCycles (an hour) and left the item off the market meanwhile. A
+  // move of at most ignoreBelowMetal is never a swing.
+  const small = Number(config.priceSwingLimits?.ignoreBelowMetal);
+  const ignoreBelow = Number.isFinite(small) ? small : 0.33;
 
-  if (nextBuy > avgBuy && (nextBuy - avgBuy) / avgBuy > maxBuyIncrease) {
+  const buyUp = nextBuy - avgBuy;
+  if (buyUp > ignoreBelow && buyUp / avgBuy > maxBuyIncrease) {
     return false;
   }
-  if (nextSell < avgSell && (avgSell - nextSell) / avgSell > maxSellDecrease) {
+  const sellDown = avgSell - nextSell;
+  if (sellDown > ignoreBelow && sellDown / avgSell > maxSellDecrease) {
     return false;
   }
   return true;
@@ -935,18 +943,26 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, as
   };
 
   try {
-    if (buyFiltered.length < 3) {
+    // Three bids normally. Two will do when the ask side is deep (3+ asks):
+    // bids are already capped at the ask, and the thin-market baseline check
+    // still runs. Without this an item that never reached three bids kept its
+    // last price forever - the Winter cosmetic cases sat on buy prices many
+    // times the market for days.
+    const minBids = sellFiltered.length >= 3 ? 2 : 3;
+    if (buyFiltered.length < minBids) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough buy listings...`);
     } else if (buyFiltered.length < 10) {
-      // 3-9 listings: mean of the top 3 bids, averaged in metal. (Exactly 3 used
-      // to fall through to the outlier filter, which cannot work on 3 points;
-      // and keys/metal were averaged separately with the keys truncated, so
-      // bids of 1 key, 2 keys and 1 key averaged to 1 key.)
+      // 2-9 listings: mean of the top 3 bids (or both, with two), averaged in
+      // metal. (Exactly 3 used to fall through to the outlier filter, which
+      // cannot work on 3 points; and keys/metal were averaged separately with
+      // the keys truncated, so bids of 1 key, 2 keys and 1 key averaged to
+      // 1 key.)
+      const n = Math.min(3, buyFiltered.length);
       let totalMetal = 0;
-      for (let i = 0; i <= 2; i++) {
+      for (let i = 0; i < n; i++) {
         totalMetal += Methods.toMetal(buyFiltered[i].currencies, keyobj.metal);
       }
-      const meanMetal = totalMetal / 3;
+      const meanMetal = totalMetal / n;
       if (sku === '5021;6') {
         final_buyObj = { keys: 0, metal: meanMetal };
       } else {

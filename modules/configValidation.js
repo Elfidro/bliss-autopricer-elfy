@@ -55,6 +55,9 @@ const DEFAULTS = {
     maxSellDecrease: 0.1,
     // A move the guard blocks is accepted once it persists this many cycles.
     confirmCycles: 4,
+    // Moves of at most this many ref are never a swing, whatever the
+    // percentage: one scrap is 11% of a 1 ref hat.
+    ignoreBelowMetal: 0.33,
   },
   websocketRelay: {
     enabled: false,

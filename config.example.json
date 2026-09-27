@@ -31,7 +31,8 @@
   "priceSwingLimits": {
     "maxBuyIncrease": 0.1,
     "maxSellDecrease": 0.1,
-    "confirmCycles": 4
+    "confirmCycles": 4,
+    "ignoreBelowMetal": 0.33
   },
   "alwaysQuerySnapshotAPI": true,
   "usePriceDbFallback": true,
