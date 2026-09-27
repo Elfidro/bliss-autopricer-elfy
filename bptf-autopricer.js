@@ -772,7 +772,10 @@ const determinePrice = async (name, sku) => {
     if (!buyListings || (sellRequired && !sellListings)) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough listings...`);
     }
-    if (buyListings.rowCount === 0 || (sellRequired && sellListings.rowCount === 0)) {
+    // No bids at all is still priceable when the ask side is deep: getAverages
+    // treats it as a sell-only market.
+    const sellCount = sellListings?.rowCount || 0;
+    if ((buyListings.rowCount === 0 && sellCount < 3) || (sellRequired && sellCount === 0)) {
       throw new Error(`| UPDATING PRICES |: ${name} not enough listings...`);
     }
   } catch (e) {
@@ -1029,9 +1032,17 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, as
             `| UPDATING PRICES |: ${name} not enough buy listings (sell-only market at ${askInMetal} ref is too large to price from the ask alone)`
           );
         }
+        // A margin under the ask, but never above the best bid if there is
+        // one (a lone 0.05 bid under a 0.88 ask says nobody wants the item),
+        // and the smallest legal buy when there are no bids at all.
         const pct = Number(config.minSellMarginPercent) || 0.03;
         const margin = Math.max(config.minSellMargin ?? 0.11, Methods.getRight(askInMetal * pct));
         let buyInMetal = Methods.getRight(askInMetal - margin);
+        if (buyFiltered.length) {
+          buyInMetal = Math.min(buyInMetal, Methods.toMetal(buyFiltered[0].currencies, keyobj.metal));
+        } else {
+          buyInMetal = 0.05;
+        }
         let sellInMetal = askInMetal;
         if (!(buyInMetal >= 0.05)) {
           buyInMetal = 0.05;
@@ -1278,8 +1289,23 @@ const finalisePrice = async (arr, name, sku, prevBySku = null) => {
         : JSON.parse(fs.readFileSync(PRICELIST_PATH, 'utf8')).items.find((i) => i.sku === sku);
 
       // Only check if previous price exists (skip price swing check for keys)
+      // A previous price that is hours old is not "the" price any more, so a
+      // big move away from it is not a spike to confirm. Without this a
+      // stale item was re-held for confirmCycles after every restart (the
+      // streaks live in memory) and could stay wrong for days.
+      const staleHoursCfg = Number(config.priceSwingLimits?.staleAfterHours);
+      const staleAfterSec = (Number.isFinite(staleHoursCfg) && staleHoursCfg > 0 ? staleHoursCfg : 6) * 3600;
+      const prevAgeSec = prev ? Math.floor(Date.now() / 1000) - Number(prev.time || 0) : 0;
+      const prevIsStale = !!prev && prevAgeSec > staleAfterSec;
+      if (prevIsStale) {
+        console.log(
+          `| UPDATING PRICES |: ${name} previous price is ${Math.round(prevAgeSec / 3600)}h old, swing guard skipped.`
+        );
+        swingStreaks.delete(sku);
+      }
+
       let swingConfirmed = false;
-      if (prev && sku !== '5021;6') {
+      if (prev && !prevIsStale && sku !== '5021;6') {
         const prevObj = { buy: prev.buy, sell: prev.sell };
         const nextObj = { buy: item.buy, sell: item.sell };
         const swingOk = await isPriceSwingAcceptable(prevObj, nextObj, sku);

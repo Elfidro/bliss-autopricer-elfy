@@ -62,6 +62,8 @@ const DEFAULTS = {
     // Moves of at most this many ref are never a swing, whatever the
     // percentage: one scrap is 11% of a 1 ref hat.
     ignoreBelowMetal: 0.33,
+    // A previous price older than this is stale and does not hold a move.
+    staleAfterHours: 6,
   },
   websocketRelay: {
     enabled: false,

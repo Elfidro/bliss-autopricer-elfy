@@ -32,7 +32,8 @@
     "maxBuyIncrease": 0.1,
     "maxSellDecrease": 0.1,
     "confirmCycles": 4,
-    "ignoreBelowMetal": 0.33
+    "ignoreBelowMetal": 0.33,
+    "staleAfterHours": 6
   },
   "alwaysQuerySnapshotAPI": true,
   "useScmFallback": false,
