@@ -10,13 +10,16 @@
 //     "updatedAt": "2026-09-27T10:00:00.000Z",
 //     "items": {
 //       "5875;6;c108": { "sellAddMetal": 1, "buyDropMetal": 0.11, "note": "mptf 60/75" },
-//       "30753;6":     { "buyCapMetal": 1.27, "note": "craftHat buy ≤ 1.27" }   // buy never above this
+//       "30753;6":     { "buyCapMetal": 1.27, "sellFloorMetal": 0, "note": "craftHat buy ≤ 1.27" }
 //     },
 //     "global": {
 //       "minSpreadMetal": 0.22,                          // sell - buy >= this; sell is raised
-//       "sellFloors": [ { "grade": "Mercenary", "metal": 3.11 } ]   // sell >= this per item grade
+//       "gradeRules": [ { "grade": "Mercenary", "buyCapMetal": 0, "sellFloorMetal": 3.11 } ]
 //     }
 //   }
+//
+// Per SKU (pricelist-ui's group rules) and per grade (global) the same two
+// knobs exist, a buy ceiling and a sell floor, applied by the same helpers.
 //
 // The adjustments are applied only on the way OUT to the bots: on every
 // socket emit and on the REST fetch tf2autobot does at startup. Nothing that
@@ -71,13 +74,30 @@ function round(v) {
   return methods ? methods.getRight(v) : Math.round(v * 100) / 100;
 }
 
+// One rule shape for grades and SKUs: an optional buy ceiling and sell floor.
+function parseSides(r) {
+  return {
+    buyCapMetal: Math.max(0, Number(r && r.buyCapMetal) || 0),
+    sellFloorMetal: Math.max(0, Number(r && r.sellFloorMetal) || 0),
+  };
+}
+
 function parseGlobal(g) {
   if (!g || typeof g !== 'object') return null;
   const minSpreadMetal = Math.max(0, Number(g.minSpreadMetal) || 0);
-  const sellFloors = (Array.isArray(g.sellFloors) ? g.sellFloors : [])
-    .map((f) => ({ grade: String((f && f.grade) || '').trim(), metal: Number(f && f.metal) || 0 }))
-    .filter((f) => f.grade && f.metal > 0);
-  return minSpreadMetal > 0 || sellFloors.length ? { minSpreadMetal, sellFloors } : null;
+  const byGrade = new Map();
+  const add = (grade, sides) => {
+    const name = String(grade || '').trim();
+    if (!name || (!sides.buyCapMetal && !sides.sellFloorMetal)) return;
+    const cur = byGrade.get(name.toLowerCase()) || { grade: name, buyCapMetal: 0, sellFloorMetal: 0 };
+    if (sides.buyCapMetal) cur.buyCapMetal = cur.buyCapMetal ? Math.min(cur.buyCapMetal, sides.buyCapMetal) : sides.buyCapMetal;
+    if (sides.sellFloorMetal) cur.sellFloorMetal = Math.max(cur.sellFloorMetal, sides.sellFloorMetal);
+    byGrade.set(name.toLowerCase(), cur);
+  };
+  for (const r of Array.isArray(g.gradeRules) ? g.gradeRules : []) add(r && r.grade, parseSides(r));
+  for (const f of Array.isArray(g.sellFloors) ? g.sellFloors : []) add(f && f.grade, { buyCapMetal: 0, sellFloorMetal: Number(f && f.metal) || 0 });   // older file format
+  const gradeRules = [...byGrade.values()];
+  return minSpreadMetal > 0 || gradeRules.length ? { minSpreadMetal, gradeRules } : null;
 }
 
 function hasPolicy() {
@@ -105,9 +125,9 @@ function load() {
     for (const [sku, adj] of Object.entries(parsed.items || {})) {
       const sellAdd = Number(adj.sellAddMetal) || 0;
       const buyDrop = Number(adj.buyDropMetal) || 0;
-      const buyCap = Math.max(0, Number(adj.buyCapMetal) || 0);
-      if (sellAdd === 0 && buyDrop === 0 && buyCap === 0) continue;
-      items.set(sku, { sellAddMetal: sellAdd, buyDropMetal: buyDrop, buyCapMetal: buyCap, note: adj.note || '' });
+      const sides = parseSides(adj);
+      if (sellAdd === 0 && buyDrop === 0 && !sides.buyCapMetal && !sides.sellFloorMetal) continue;
+      items.set(sku, { sellAddMetal: sellAdd, buyDropMetal: buyDrop, ...sides, note: adj.note || '' });
     }
     state = {
       mtimeMs: stats.mtimeMs,
@@ -173,65 +193,63 @@ function gradeOf(sku, name) {
   return null;
 }
 
-// Buy price ceiling (from a group rule): the buy price never goes above cap.
-// A key-priced buy is compared in metal at the current key price and left
-// alone until that price is known.
-function capBuy(out, cap, effects) {
-  const keyMetal = Number(getKeyMetal()) || 0;
-  const keys = out.buy.keys || 0;
-  if (keys > 0 && !(keyMetal > 0)) return;
-  const total = keys * keyMetal + (out.buy.metal || 0);
-  if (total <= cap + 0.005) return;
-  // Round DOWN to a whole scrap so the result never exceeds the cap (1.27 -> 1.22).
-  const floorScrap = (v) => round(Math.floor(v / 0.11 + 1e-6) * 0.11);
-  if (keyMetal > 0 && cap >= keyMetal) {
-    out.buy.keys = Math.floor(cap / keyMetal);
-    out.buy.metal = floorScrap(cap % keyMetal);
-  } else {
-    out.buy.keys = 0;
-    out.buy.metal = floorScrap(cap);
-  }
-  effects.push(`buy capped at ${cap} ref`);
+// ── Shared price helpers ──────────────────────────────────────────────────
+// The same three moves serve the per-SKU group rules and the global grade
+// rules: cap the buy, floor the sell, keep the spread. Prices with keys are
+// worked in metal at the current key price and skipped until it is known.
+function keyMetalNow() { return Number(getKeyMetal()) || 0; }
+function usesKeys(p) { return (p.keys || 0) > 0; }
+function priceToMetal(p, keyMetal) { return (p.keys || 0) * keyMetal + (p.metal || 0); }
+function warnKeyMetal() {
+  if (keyMetalWarned) return;
+  console.warn('[POLICY] key price not known yet; rules skip key-priced items until it is');
+  keyMetalWarned = true;
+}
+// Split a metal total into whole keys (when the key price is known) + metal.
+function splitKeys(total, keyMetal) {
+  const keys = keyMetal > 0 && total >= keyMetal ? Math.floor(total / keyMetal) : 0;
+  return { keys, rest: Math.max(0, total - keys * keyMetal) };
 }
 
-// Global rules on one item. Only the sell side ever moves, and only upward.
-function applyGlobal(out, item, g, effects) {
-  const keyMetal = Number(getKeyMetal()) || 0;
-  const usesKeys = (out.buy.keys || 0) > 0 || (out.sell.keys || 0) > 0;
-  if (usesKeys && !(keyMetal > 0)) {
-    if (!keyMetalWarned) {
-      console.warn('[POLICY] key price not known yet; global rules skip key-priced items until it is');
-      keyMetalWarned = true;
-    }
-    return;
-  }
-  const toMetal = (p) => (p.keys || 0) * keyMetal + (p.metal || 0);
-  const setSell = (total) => {
-    let metal = total - (out.sell.keys || 0) * keyMetal;
-    if (keyMetal > 0 && metal >= keyMetal) {          // carry whole keys
-      out.sell.keys = (out.sell.keys || 0) + Math.floor(metal / keyMetal);
-      metal %= keyMetal;
-    }
-    out.sell.metal = round(Math.max(0, metal));
-  };
-  if (g.minSpreadMetal > 0) {
-    const buyM = toMetal(out.buy);
-    if (toMetal(out.sell) - buyM < g.minSpreadMetal - 0.005) {
-      setSell(buyM + g.minSpreadMetal);
-      effects.push(`sell raised to buy + ${g.minSpreadMetal} ref`);
-    }
-  }
-  if (g.sellFloors.length) {
-    const grade = gradeOf(item.sku, item.name);
-    const floor = grade && g.sellFloors.find((f) => f.grade.toLowerCase() === grade.toLowerCase());
-    if (floor && toMetal(out.sell) < floor.metal - 0.005) {
-      setSell(floor.metal);
-      effects.push(`${grade} sell floor ${floor.metal} ref`);
-    }
-  }
+// Buy price ceiling: never above cap. Rounded DOWN to a whole scrap so the
+// result never exceeds the cap (1.27 -> 1.22).
+function capBuy(out, cap, effects, why) {
+  const keyMetal = keyMetalNow();
+  if (usesKeys(out.buy) && !(keyMetal > 0)) return warnKeyMetal();
+  if (priceToMetal(out.buy, keyMetal) <= cap + 0.005) return;
+  const { keys, rest } = splitKeys(cap, keyMetal);
+  out.buy.keys = keys;
+  out.buy.metal = round(Math.floor(rest / 0.11 + 1e-6) * 0.11);
+  effects.push(`${why} buy capped at ${cap} ref`);
+}
+
+// Sell price floor: never below floor (only ever raises the sell price).
+function floorSell(out, floor, effects, why) {
+  const keyMetal = keyMetalNow();
+  if (usesKeys(out.sell) && !(keyMetal > 0)) return warnKeyMetal();
+  if (priceToMetal(out.sell, keyMetal) >= floor - 0.005) return;
+  const { keys, rest } = splitKeys(floor, keyMetal);
+  out.sell.keys = keys;
+  out.sell.metal = round(rest);
+  effects.push(`${why} sell floor ${floor} ref`);
+}
+
+// Minimum spread: the sell price is raised to buy + spread; the buy price is
+// never lowered for this.
+function keepSpread(out, spread, effects) {
+  const keyMetal = keyMetalNow();
+  if ((usesKeys(out.buy) || usesKeys(out.sell)) && !(keyMetal > 0)) return warnKeyMetal();
+  const buyM = priceToMetal(out.buy, keyMetal);
+  if (priceToMetal(out.sell, keyMetal) - buyM >= spread - 0.005) return;
+  const { keys, rest } = splitKeys(buyM + spread, keyMetal);
+  out.sell.keys = keys;
+  out.sell.metal = round(rest);
+  effects.push(`sell raised to buy + ${spread} ref`);
 }
 
 // Returns the item as the bots should see it. Untouched items come back as-is.
+// Order: the SKU's stock adjustments, buy ceilings (group, then grade), the
+// spread, then sell floors (group, then grade) as the last word.
 function apply(item) {
   if (!item || !item.sku || !item.buy || !item.sell) return item;
   load();
@@ -244,10 +262,15 @@ function apply(item) {
   if (adj) {
     if (adj.sellAddMetal) out.sell.metal = round((out.sell.metal || 0) + adj.sellAddMetal);
     if (adj.buyDropMetal) out.buy.metal = Math.max(0, round((out.buy.metal || 0) - adj.buyDropMetal));
-    if (adj.sellAddMetal || adj.buyDropMetal) effects.push(describeAdjustment({ ...adj, buyCapMetal: 0 }));
-    if (adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects);
+    if (adj.sellAddMetal || adj.buyDropMetal) effects.push(describeAdjustment({ sellAddMetal: adj.sellAddMetal, buyDropMetal: adj.buyDropMetal, note: adj.note }));
   }
-  if (g) applyGlobal(out, item, g, effects);
+  const grade = g && g.gradeRules.length ? gradeOf(item.sku, item.name) : null;
+  const gr = grade ? g.gradeRules.find((r) => r.grade.toLowerCase() === grade.toLowerCase()) : null;
+  if (adj && adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects, 'group');
+  if (gr && gr.buyCapMetal) capBuy(out, gr.buyCapMetal, effects, grade);
+  if (g && g.minSpreadMetal > 0) keepSpread(out, g.minSpreadMetal, effects);
+  if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
+  if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
   if (!effects.length) return item;
   lastEffects.set(item.sku, effects.join(', '));
   // tf2autobot only takes a price it considers newer, so an adjusted price
@@ -274,6 +297,7 @@ function describeAdjustment(adj) {
   if (adj.sellAddMetal) parts.push(`sell +${adj.sellAddMetal} ref`);
   if (adj.buyDropMetal) parts.push(`buy -${adj.buyDropMetal} ref`);
   if (adj.buyCapMetal) parts.push(`buy ≤ ${adj.buyCapMetal} ref`);
+  if (adj.sellFloorMetal) parts.push(`sell ≥ ${adj.sellFloorMetal} ref`);
   return parts.join(', ') + (adj.note ? ` (${adj.note})` : '');
 }
 
@@ -300,7 +324,7 @@ function watch(onChange) {
     for (const sku of keys) {
       const a = previous.get(sku);
       const b = state.items.get(sku);
-      if (!a !== !b || (a && b && (a.sellAddMetal !== b.sellAddMetal || a.buyDropMetal !== b.buyDropMetal || a.buyCapMetal !== b.buyCapMetal))) {
+      if (!a !== !b || (a && b && (a.sellAddMetal !== b.sellAddMetal || a.buyDropMetal !== b.buyDropMetal || a.buyCapMetal !== b.buyCapMetal || a.sellFloorMetal !== b.sellFloorMetal))) {
         changed.push(sku);
       }
     }
