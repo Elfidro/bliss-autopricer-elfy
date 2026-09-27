@@ -87,13 +87,16 @@ function parseSides(r) {
 // Flat ref amounts do not scale: +1 ref on a 0.55 ref case triples it while
 // +1 on a 13 ref case is a nudge. Every flat markup is therefore capped at a
 // share of the item's market price: a sell add at maxSellAddPct of the market
-// sell (default 20%), the minimum spread at minSpreadPct (default 10%, never
-// under one weapon). Above the crossover price (flat / pct) the flat amount
-// applies unchanged, so cheap items get a proportional markup and dear ones
-// exactly what was configured.
+// sell (default 20%), the minimum spread at minSpreadPct (default 10%). Above
+// the crossover price (flat / pct) the flat amount applies unchanged, so cheap
+// items get a proportional markup and dear ones exactly what was configured.
+// The spread is worked in whole weapons (half scraps, the smallest price
+// step) and rounds DOWN, so an item under 0.55 ref at 10% needs no spread at
+// all instead of being pushed a whole scrap above the market.
 const DEFAULT_MAX_SELL_ADD_PCT = 0.2;
 const DEFAULT_MIN_SPREAD_PCT = 0.1;
-const WEAPON = 0.05;
+const WEAPON = 1 / 18;
+const toWeapons = (metal) => Math.round(metal * 18);
 
 function pctOrDefault(v, dflt) {
   const n = Number(v);
@@ -129,11 +132,14 @@ function cappedSellAdd(add, sellMetal, pct) {
   return Math.min(add, sellMetal * pct);
 }
 
-// The spread to enforce on an item whose market sell is sellMetal.
-function cappedSpread(spread, sellMetal, pct) {
+// The spread to enforce on an item whose market sell is sellMetal, in whole
+// weapons: the share of the sell price rounded down, capped at the flat
+// spread. Zero means the rule is skipped for this item.
+function cappedSpreadWeapons(spread, sellMetal, pct) {
   if (!(spread > 0)) return 0;
-  if (!(sellMetal > 0)) return spread;
-  return Math.max(WEAPON, Math.min(spread, sellMetal * pct));
+  const flat = toWeapons(spread);
+  if (!(sellMetal > 0)) return flat;
+  return Math.min(flat, Math.floor(sellMetal * pct * 18 + 1e-6));
 }
 
 function hasPolicy() {
@@ -270,17 +276,20 @@ function floorSell(out, floor, effects, why) {
   effects.push(`${why} sell floor ${floor} ref`);
 }
 
-// Minimum spread: the sell price is raised to buy + spread; the buy price is
-// never lowered for this.
-function keepSpread(out, spread, effects) {
+// Minimum spread (in weapons): the sell price is raised to buy + spread; the
+// buy price is never lowered for this. A market spread that already covers
+// the requirement is left exactly as it is.
+function keepSpread(out, weapons, effects) {
+  if (!(weapons > 0)) return;
   const keyMetal = keyMetalNow();
   if ((usesKeys(out.buy) || usesKeys(out.sell)) && !(keyMetal > 0)) return warnKeyMetal();
   const buyM = priceToMetal(out.buy, keyMetal);
-  if (priceToMetal(out.sell, keyMetal) - buyM >= spread - 0.005) return;
+  if (toWeapons(priceToMetal(out.sell, keyMetal) - buyM) >= weapons) return;
+  const spread = weapons * WEAPON;
   const { keys, rest } = splitKeys(buyM + spread, keyMetal);
   out.sell.keys = keys;
   out.sell.metal = round(rest);
-  effects.push(`sell raised to buy + ${spread} ref`);
+  effects.push(`sell raised to buy + ${round(spread)} ref`);
 }
 
 // Returns the item as the bots should see it. Untouched items come back as-is.
@@ -332,7 +341,7 @@ function apply(item) {
   const gr = grade ? g.gradeRules.find((r) => r.grade.toLowerCase() === grade.toLowerCase()) : null;
   if (adj && adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects, 'group');
   if (gr && gr.buyCapMetal) capBuy(out, gr.buyCapMetal, effects, grade);
-  if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpread(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
+  if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpreadWeapons(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
   if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
   if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
   if (!effects.length) return item;
