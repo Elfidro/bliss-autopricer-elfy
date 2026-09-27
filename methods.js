@@ -61,16 +61,23 @@ Methods.prototype.calculateBptfBaselineDifference = function (
 };
 
 // Rounds the metal value to the nearest scrap.
+// Round a metal value to the nearest weapon (half a scrap, 1/18 ref), written
+// the way backpack.tf and tf2autobot write it: 0.05, 0.11, 0.16, 0.22, 0.27,
+// 0.33 ... 0.94, 1. That is scrap / 9 truncated to two decimals, which is what
+// @tf2autobot/tf2-currencies does, so a listing at 1.05 or 5.38 comes back
+// unchanged. This used to round to the nearest whole scrap (0.11), which threw
+// away half of the market's price steps and turned a one-weapon (0.05 ref) bid
+// into 0, so an item bid at a weapon could never be priced at all.
 Methods.prototype.getRight = function (v) {
-  var i = Math.floor(v),
-    f = Math.round((v - i) / 0.11);
-  return parseFloat((i + (f === 9 ? 1 : f * 0.11)).toFixed(2));
+  const halfScraps = Math.round(v * 18);
+  const scrap = halfScraps / 2;
+  return Math.floor(Math.round((scrap / 9) * 10000) / 100) / 100;
 };
 
 // This method first takes the amount of keys the item costs and multiplies it by
 // the current key metal sell price. This gives us the amount of metal the key cost
 // is worth in terms of a keys current sell price. Then it adds this result onto
-// the metal cost. It's then rounded down to the nearest 0.11.
+// the metal cost. It's then rounded to the nearest weapon (half scrap).
 
 // From here, the metal (being both the worth of the keys and the metal value), is
 // divided into the sell price of a key. Totalling the amount of keys that could be

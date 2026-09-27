@@ -1155,9 +1155,8 @@ const finalisePrice = async (arr, name, sku, prevBySku = null) => {
       // Generates a UNIX timestamp of the present time, used to show a client when the prices were last updated.
       item.time = Math.floor(Date.now() / 1000);
 
-      // We're taking the buy JSON and getting the metal price from it, then rounding down to the nearest .11.
+      // Round both sides to the nearest weapon (half scrap), see getRight.
       arr[0].metal = Methods.getRight(arr[0].metal);
-      // We're taking the sell JSON and getting the metal price from it, then rounding down to the nearest .11.
       arr[1].metal = Methods.getRight(arr[1].metal);
 
       // We are taking the buy array price as a whole, and also passing in the current selling price

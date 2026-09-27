@@ -54,7 +54,7 @@ async function getSCMPriceObject({
   // Apply margin
   let buyMetal = priceInMetal * (1 - scmMarginBuy);
   let sellMetal = priceInMetal * (1 + scmMarginSell);
-  // Always round to nearest scrap using getRight
+  // Always round to the nearest weapon (half scrap) using getRight
   buyMetal = methods.getRight(buyMetal);
   sellMetal = methods.getRight(sellMetal);
   return {
