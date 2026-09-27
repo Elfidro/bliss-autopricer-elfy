@@ -9,7 +9,8 @@
 //   {
 //     "updatedAt": "2026-09-27T10:00:00.000Z",
 //     "items": {
-//       "5875;6;c108": { "sellAddMetal": 1, "buyDropMetal": 0.11, "note": "mptf 60/75" }
+//       "5875;6;c108": { "sellAddMetal": 1, "buyDropMetal": 0.11, "note": "mptf 60/75" },
+//       "30753;6":     { "buyCapMetal": 1.27, "note": "craftHat buy ≤ 1.27" }   // buy never above this
 //     },
 //     "global": {
 //       "minSpreadMetal": 0.22,                          // sell - buy >= this; sell is raised
@@ -104,8 +105,9 @@ function load() {
     for (const [sku, adj] of Object.entries(parsed.items || {})) {
       const sellAdd = Number(adj.sellAddMetal) || 0;
       const buyDrop = Number(adj.buyDropMetal) || 0;
-      if (sellAdd === 0 && buyDrop === 0) continue;
-      items.set(sku, { sellAddMetal: sellAdd, buyDropMetal: buyDrop, note: adj.note || '' });
+      const buyCap = Math.max(0, Number(adj.buyCapMetal) || 0);
+      if (sellAdd === 0 && buyDrop === 0 && buyCap === 0) continue;
+      items.set(sku, { sellAddMetal: sellAdd, buyDropMetal: buyDrop, buyCapMetal: buyCap, note: adj.note || '' });
     }
     state = {
       mtimeMs: stats.mtimeMs,
@@ -171,6 +173,27 @@ function gradeOf(sku, name) {
   return null;
 }
 
+// Buy price ceiling (from a group rule): the buy price never goes above cap.
+// A key-priced buy is compared in metal at the current key price and left
+// alone until that price is known.
+function capBuy(out, cap, effects) {
+  const keyMetal = Number(getKeyMetal()) || 0;
+  const keys = out.buy.keys || 0;
+  if (keys > 0 && !(keyMetal > 0)) return;
+  const total = keys * keyMetal + (out.buy.metal || 0);
+  if (total <= cap + 0.005) return;
+  // Round DOWN to a whole scrap so the result never exceeds the cap (1.27 -> 1.22).
+  const floorScrap = (v) => round(Math.floor(v / 0.11 + 1e-6) * 0.11);
+  if (keyMetal > 0 && cap >= keyMetal) {
+    out.buy.keys = Math.floor(cap / keyMetal);
+    out.buy.metal = floorScrap(cap % keyMetal);
+  } else {
+    out.buy.keys = 0;
+    out.buy.metal = floorScrap(cap);
+  }
+  effects.push(`buy capped at ${cap} ref`);
+}
+
 // Global rules on one item. Only the sell side ever moves, and only upward.
 function applyGlobal(out, item, g, effects) {
   const keyMetal = Number(getKeyMetal()) || 0;
@@ -221,7 +244,8 @@ function apply(item) {
   if (adj) {
     if (adj.sellAddMetal) out.sell.metal = round((out.sell.metal || 0) + adj.sellAddMetal);
     if (adj.buyDropMetal) out.buy.metal = Math.max(0, round((out.buy.metal || 0) - adj.buyDropMetal));
-    effects.push(describeAdjustment(adj));
+    if (adj.sellAddMetal || adj.buyDropMetal) effects.push(describeAdjustment({ ...adj, buyCapMetal: 0 }));
+    if (adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects);
   }
   if (g) applyGlobal(out, item, g, effects);
   if (!effects.length) return item;
@@ -249,6 +273,7 @@ function describeAdjustment(adj) {
   const parts = [];
   if (adj.sellAddMetal) parts.push(`sell +${adj.sellAddMetal} ref`);
   if (adj.buyDropMetal) parts.push(`buy -${adj.buyDropMetal} ref`);
+  if (adj.buyCapMetal) parts.push(`buy ≤ ${adj.buyCapMetal} ref`);
   return parts.join(', ') + (adj.note ? ` (${adj.note})` : '');
 }
 
@@ -275,7 +300,7 @@ function watch(onChange) {
     for (const sku of keys) {
       const a = previous.get(sku);
       const b = state.items.get(sku);
-      if (!a !== !b || (a && b && (a.sellAddMetal !== b.sellAddMetal || a.buyDropMetal !== b.buyDropMetal))) {
+      if (!a !== !b || (a && b && (a.sellAddMetal !== b.sellAddMetal || a.buyDropMetal !== b.buyDropMetal || a.buyCapMetal !== b.buyCapMetal))) {
         changed.push(sku);
       }
     }
