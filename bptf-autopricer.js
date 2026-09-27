@@ -1046,9 +1046,12 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, as
         let sellInMetal = askInMetal;
         if (!(buyInMetal >= 0.05)) {
           buyInMetal = 0.05;
-          if (sellInMetal <= buyInMetal) {
-            sellInMetal = Methods.getRight(buyInMetal + 0.05);
-          }
+        }
+        // tf2autobot rejects buy >= sell, and finalisePrice would try to push
+        // the buy under a 0.05 ask and find no room. Sell a weapon over the
+        // buy instead: 0.05 / 0.11 is the smallest legal pair.
+        if (sellInMetal <= buyInMetal) {
+          sellInMetal = Methods.getRight(buyInMetal + 0.05);
         }
         final_buyObj = { keys: 0, metal: buyInMetal };
         final_sellObj = { keys: 0, metal: sellInMetal };
