@@ -286,6 +286,9 @@ function keepSpread(out, spread, effects) {
 // spread, then sell floors (group, then grade) as the last word.
 function apply(item) {
   if (!item || !item.sku || !item.buy || !item.sell) return item;
+  // The key is the unit every rule is measured in; a spread or floor applied
+  // to it re-expresses its own price in keys (64.66 ref became 1 key + 0.11).
+  if (item.sku === '5021;6') return item;
   load();
   if (!hasPolicy() || !isFresh()) return item;
   const adj = state.items.get(item.sku) || null;
