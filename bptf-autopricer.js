@@ -42,6 +42,15 @@ emitQueue.enqueue = (item) => {
   if (adjusted !== item) {
     console.log(`[POLICY] ${item.name || item.sku}: ${pricePolicy.describe(item.sku)} -> buy ${adjusted.buy.keys}k ${adjusted.buy.metal} / sell ${adjusted.sell.keys}k ${adjusted.sell.metal}`);
   }
+  // tf2autobot drops a price that falls by exactly half a scrap (its rounding
+  // gate, see pricePolicy.bridgeFor): send a bridging price first so it lands.
+  const prev = adjusted && pricePolicy.lastSentFor(adjusted.sku);
+  const bridge = pricePolicy.bridgeFor(prev, adjusted);
+  if (bridge) {
+    console.log(`[POLICY] ${adjusted.name || adjusted.sku}: half-scrap decrease bridged (${pricePolicy.describeBridge(prev, bridge, adjusted)})`);
+    rawEnqueue(bridge);
+  }
+  pricePolicy.recordSent(adjusted);
   rawEnqueue(adjusted);
 };
 

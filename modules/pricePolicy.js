@@ -10,7 +10,8 @@
 //     "updatedAt": "2026-09-27T10:00:00.000Z",
 //     "items": {
 //       "5875;6;c108": { "sellAddMetal": 1, "buyDropMetal": 0.11, "note": "mptf 60/75" },
-//       "30753;6":     { "buyCapMetal": 1.27, "sellFloorMetal": 0, "note": "craftHat buy ≤ 1.27" }
+//       "30753;6":     { "buyCapMetal": 1.27, "sellFloorMetal": 0, "note": "craftHat buy ≤ 1.27" },
+//       "30469;6":     { "buyAddWeapons": 1, "buyAddMinMetal": 1.22, "note": "Lia out of stock" }
 //     },
 //     "global": {
 //       "minSpreadMetal": 0.22,                          // sell - buy >= this; sell is raised
@@ -21,11 +22,28 @@
 // Per SKU (pricelist-ui's group rules) and per grade (global) the same two
 // knobs exist, a buy ceiling and a sell floor, applied by the same helpers.
 //
+// Out of stock: pricelist-ui marks the SKUs a bot has none of with
+// buyAddWeapons (whole weapons, 1 = half a scrap) and buyAddMinMetal. The buy
+// goes up by that much when the MARKET buy is above buyAddMinMetal (checked
+// against the market price, never the bumped one, so the rule cannot feed on
+// itself). It is paid on purpose to keep the item in stock, so it is the very
+// last step and nothing reacts to it: the sell, the spread, the caps and the
+// floors are worked out as if it did not exist (a craft hat held at its 1.27
+// cap still gets its half scrap on top). The one exception: a bump that would
+// bring the buy up to the sell is skipped.
+//
 // The adjustments are applied only on the way OUT to the bots: on every
 // socket emit and on the REST fetch tf2autobot does at startup. Nothing that
 // is stored or scored changes. Order per item: the SKU's own sell add / buy
-// drop, then the minimum spread (only ever raises the sell price, never
-// lowers the buy), then the grade sell floor, so the floor is the last word.
+// drop, the buy ceilings, then the minimum spread (only ever raises the sell
+// price, never lowers the buy), then the sell floors, and finally the
+// out-of-stock buy bump on top of whatever buy those produced.
+//
+// tf2autobot drops a socket price update whose change rounds to 0 scrap on
+// both sides, and Math.round(-0.5) is -0: a price that falls by exactly half
+// a scrap (a bump coming off when the bot gets one back) would never land.
+// bridgeFor() works out an intermediate price for the emit path to send
+// first, from what was last sent for the SKU (see lastSentFor/recordSent).
 //
 // Grades come from the schema: items_game.item_collections lists every case
 // cosmetic under its rarity (rare = Mercenary, mythical = Commando, ...). An
@@ -168,8 +186,19 @@ function load() {
       const sellAdd = Number(adj.sellAddMetal) || 0;
       const buyDrop = Number(adj.buyDropMetal) || 0;
       const sides = parseSides(adj);
-      if (sellAdd === 0 && buyDrop === 0 && !sides.buyCapMetal && !sides.sellFloorMetal) continue;
-      items.set(sku, { sellAddMetal: sellAdd, buyDropMetal: buyDrop, ...sides, note: adj.note || '' });
+      const buyAddWeapons = Math.max(0, Math.round(Number(adj.buyAddWeapons) || 0));
+      const buyAddMinMetal = Math.max(0, Number(adj.buyAddMinMetal) || 0);
+      if (sellAdd === 0 && buyDrop === 0 && !sides.buyCapMetal && !sides.sellFloorMetal && !buyAddWeapons) {
+        continue;
+      }
+      items.set(sku, {
+        sellAddMetal: sellAdd,
+        buyDropMetal: buyDrop,
+        ...sides,
+        buyAddWeapons,
+        buyAddMinMetal,
+        note: adj.note || '',
+      });
     }
     state = {
       mtimeMs: stats.mtimeMs,
@@ -292,9 +321,41 @@ function keepSpread(out, weapons, effects) {
   effects.push(`sell raised to buy + ${round(spread)} ref`);
 }
 
+// a < b, in metal when the key price is known, else keys first, then metal
+// (normalised prices keep the metal under a key).
+function priceBelow(a, b, keyMetal) {
+  if (keyMetal > 0) return priceToMetal(a, keyMetal) < priceToMetal(b, keyMetal) - 0.005;
+  if ((a.keys || 0) !== (b.keys || 0)) return (a.keys || 0) < (b.keys || 0);
+  return (a.metal || 0) < (b.metal || 0) - 0.005;
+}
+
+// Out-of-stock buy bump, the last step: adj.buyAddWeapons whole weapons on
+// top of the buy the other rules produced, when the item's MARKET buy is above
+// adj.buyAddMinMetal. A key-priced buy with the key price not known yet counts
+// as above (a key is far over it). Skipped only when it would meet the sell.
+function bumpBuy(out, item, adj, effects) {
+  const keyMetal = keyMetalNow();
+  const known = keyMetal > 0;
+  const marketBuy = usesKeys(item.buy) && !known ? Infinity : priceToMetal(item.buy, keyMetal);
+  if (!(marketBuy > adj.buyAddMinMetal + 0.005)) return;
+  const bumped = {
+    ...out.buy,
+    keys: out.buy.keys || 0,
+    metal: round((out.buy.metal || 0) + adj.buyAddWeapons * WEAPON),
+  };
+  // Nothing runs after this to raise the sell, so never buy at the sell.
+  if (!priceBelow(bumped, out.sell, keyMetal)) {
+    effects.push('buy bump skipped: would meet the sell');
+    return;
+  }
+  out.buy = bumped;
+  effects.push(`buy +${adj.buyAddWeapons / 2} scrap (out of stock)`);
+}
+
 // Returns the item as the bots should see it. Untouched items come back as-is.
 // Order: the SKU's stock adjustments, buy ceilings (group, then grade), the
-// spread, then sell floors (group, then grade) as the last word.
+// spread, sell floors (group, then grade), then the out-of-stock buy bump,
+// which nothing before it takes into account.
 // What the bots see for the key. tf2autobot values keys a buyer pays with at
 // the key BUY price, and keys it hands out at the key SELL price, so a buy
 // price keyPricing.botBuyDiscountMetal under the market is a fee on paying in
@@ -344,6 +405,7 @@ function apply(item) {
   if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpreadWeapons(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
   if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
   if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
+  if (adj && adj.buyAddWeapons > 0) bumpBuy(out, item, adj, effects);
   if (!effects.length) return item;
   lastEffects.set(item.sku, effects.join(', '));
   // tf2autobot only takes a price it considers newer, so an adjusted price
@@ -351,6 +413,68 @@ function apply(item) {
   const policySec = Math.floor(state.updatedAt / 1000);
   if (!out.time || out.time < policySec) out.time = policySec;
   return out;
+}
+
+// ── Half-scrap decrease bridge ────────────────────────────────────────────
+// tf2autobot 5.18 (Pricelist.handlePriceChange) ignores a socket price update
+// when Math.round(new - old), in scrap, is 0 on both sides. Math.round(-0.5)
+// is -0 while Math.round(0.5) is 1, so a rise of half a scrap lands but a fall
+// of exactly half a scrap (with the other side still or also falling by half)
+// is dropped and the bot keeps the old price. There is no time check on that
+// path, so a bridge carries the same time as the real price.
+const lastSent = new Map(); // sku -> { buy, sell } as last handed to the emit queue
+
+function lastSentFor(sku) {
+  return lastSent.get(sku) || null;
+}
+
+function recordSent(item) {
+  if (!item || !item.sku || !item.buy || !item.sell) return;
+  lastSent.set(item.sku, { buy: { ...item.buy }, sell: { ...item.sell } });
+}
+
+// A price worth `weapons` weapons in total, keeping p's key count where it can.
+function withWeapons(p, weapons, keyMetal) {
+  const total = weapons * WEAPON;
+  const keys = p.keys || 0;
+  if (total - keys * keyMetal >= -1e-9) return { ...p, keys, metal: round(total - keys * keyMetal) };
+  const split = splitKeys(total, keyMetal);
+  return { ...p, keys: split.keys, metal: round(split.rest) };
+}
+
+// The intermediate price to send before `next` so the bot, holding `prev`,
+// takes both steps; null when `next` lands on its own, nothing was sent
+// before, or keys are involved and the key price is not known.
+// The bridge only ever makes the deal worse for the trader: a buy that falls
+// by half a scrap is sent one weapon lower first (-1 scrap, then +0.5); a sell
+// that falls on its own is sent one weapon ABOVE the old sell first (+0.5,
+// then -1), so the bridge never undersells or brings the sell down to the buy.
+function bridgeFor(prev, next, keyMetal = keyMetalNow()) {
+  if (!prev || !next || !prev.buy || !prev.sell || !next.buy || !next.sell) return null;
+  if (next.sku === '5021;6') return null;
+  const km = Number(keyMetal) || 0;
+  if ([prev.buy, prev.sell, next.buy, next.sell].some(usesKeys) && !(km > 0)) return null;
+  const w = (p) => toWeapons(priceToMetal(p, km));
+  const nextBuyW = w(next.buy);
+  const nextSellW = w(next.sell);
+  const dBuyW = nextBuyW - w(prev.buy);
+  const dSellW = nextSellW - w(prev.sell);
+  if (Math.round(dBuyW / 2) !== 0 || Math.round(dSellW / 2) !== 0) return null; // lands as it is
+  if (dBuyW === 0 && dSellW === 0) return null; // nothing moved
+  const bridge = { ...next, buy: { ...next.buy }, sell: { ...next.sell } };
+  if (dBuyW < 0 && nextBuyW >= 1) bridge.buy = withWeapons(next.buy, nextBuyW - 1, km);
+  else bridge.sell = withWeapons(next.sell, nextSellW + 2, km);
+  return bridge;
+}
+
+function fmtPrice(p) {
+  return p.keys ? `${p.keys}k ${p.metal}` : `${p.metal}`;
+}
+
+// "buy 1.38 → 1.27 → 1.33" for the log line.
+function describeBridge(prev, bridge, next) {
+  const side = fmtPrice(bridge.buy) !== fmtPrice(next.buy) ? 'buy' : 'sell';
+  return `${side} ${fmtPrice(prev[side])} → ${fmtPrice(bridge[side])} → ${fmtPrice(next[side])}`;
 }
 
 function applyAll(items) {
@@ -371,6 +495,7 @@ function describeAdjustment(adj) {
   if (adj.buyDropMetal) parts.push(`buy -${adj.buyDropMetal} ref`);
   if (adj.buyCapMetal) parts.push(`buy ≤ ${adj.buyCapMetal} ref`);
   if (adj.sellFloorMetal) parts.push(`sell ≥ ${adj.sellFloorMetal} ref`);
+  if (adj.buyAddWeapons) parts.push(`buy +${adj.buyAddWeapons / 2} scrap when > ${adj.buyAddMinMetal} ref`);
   return parts.join(', ') + (adj.note ? ` (${adj.note})` : '');
 }
 
@@ -397,7 +522,16 @@ function watch(onChange) {
     for (const sku of keys) {
       const a = previous.get(sku);
       const b = state.items.get(sku);
-      if (!a !== !b || (a && b && (a.sellAddMetal !== b.sellAddMetal || a.buyDropMetal !== b.buyDropMetal || a.buyCapMetal !== b.buyCapMetal || a.sellFloorMetal !== b.sellFloorMetal))) {
+      const moved =
+        a &&
+        b &&
+        (a.sellAddMetal !== b.sellAddMetal ||
+          a.buyDropMetal !== b.buyDropMetal ||
+          a.buyCapMetal !== b.buyCapMetal ||
+          a.sellFloorMetal !== b.sellFloorMetal ||
+          a.buyAddWeapons !== b.buyAddWeapons ||
+          a.buyAddMinMetal !== b.buyAddMinMetal);
+      if (!a !== !b || moved) {
         changed.push(sku);
       }
     }
@@ -423,4 +557,17 @@ function getState() {
   };
 }
 
-module.exports = { init, apply, applyAll, hasAdjustments, describe, watch, getState, gradeOf };
+module.exports = {
+  init,
+  apply,
+  applyAll,
+  hasAdjustments,
+  describe,
+  watch,
+  getState,
+  gradeOf,
+  bridgeFor,
+  describeBridge,
+  lastSentFor,
+  recordSent,
+};
