@@ -34,8 +34,8 @@
 //
 // The adjustments are applied only on the way OUT to the bots: on every
 // socket emit and on the REST fetch tf2autobot does at startup. Nothing that
-// is stored or scored changes. Order per item: the SKU's own sell add / buy
-// drop, the buy ceilings, then the minimum spread (only ever raises the sell
+// is stored or scored changes. Order per item: the SKU's own sell add, the
+// buy ceilings, the SKU's buy drop (off the capped buy), then the minimum spread (only ever raises the sell
 // price, never lowers the buy), then the sell floors, and finally the
 // out-of-stock buy bump on top of whatever buy those produced.
 //
@@ -395,13 +395,26 @@ function apply(item) {
         effects.push(`sell add capped at ${Math.round(addPct * 100)}% (${round(add)} ref)`);
       }
     }
-    if (adj.buyDropMetal) out.buy.metal = Math.max(0, round((out.buy.metal || 0) - adj.buyDropMetal));
     if (adj.sellAddMetal || adj.buyDropMetal) effects.push(describeAdjustment({ sellAddMetal: adj.sellAddMetal, buyDropMetal: adj.buyDropMetal, note: adj.note }));
   }
   const grade = g && g.gradeRules.length ? gradeOf(item.sku, item.name) : null;
   const gr = grade ? g.gradeRules.find((r) => r.grade.toLowerCase() === grade.toLowerCase()) : null;
   if (adj && adj.buyCapMetal) capBuy(out, adj.buyCapMetal, effects, 'group');
   if (gr && gr.buyCapMetal) capBuy(out, gr.buyCapMetal, effects, grade);
+  // The stock drop comes off the CAPPED buy, so a drop on a craft hat whose
+  // market buy sits above the season cap is not erased by the cap (market
+  // 1.55, cap 1.33, drop 0.22 -> 1.11, not 1.33). Key-priced buys are left
+  // alone until the key price is known, like the other rules.
+  if (adj && adj.buyDropMetal) {
+    const keyMetal = keyMetalNow();
+    if (usesKeys(out.buy) && !(keyMetal > 0)) warnKeyMetal();
+    else {
+      const dropped = Math.max(0, priceToMetal(out.buy, keyMetal) - adj.buyDropMetal);
+      const { keys, rest } = splitKeys(dropped, keyMetal);
+      out.buy.keys = keys;
+      out.buy.metal = round(rest);
+    }
+  }
   if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpreadWeapons(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
   if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
   if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
