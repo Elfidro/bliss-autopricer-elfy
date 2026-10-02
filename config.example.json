@@ -28,6 +28,16 @@
   "ownBotSteamIDs": [],
   "isolatedAskGap": 0.25,
   "maxAskToBidRatio": 3,
+  "sellAnchor": {
+    "enabled": true,
+    "minBids": 3,
+    "maxAboveBuyPct": 0.6,
+    "maxAboveBuyMetal": 0.66,
+    "maxAboveBaselinePct": 0.25
+  },
+  "sellOnly": {
+    "maxAskWithoutBidsMetal": 1
+  },
   "priceSwingLimits": {
     "maxBuyIncrease": 0.1,
     "maxSellDecrease": 0.1,

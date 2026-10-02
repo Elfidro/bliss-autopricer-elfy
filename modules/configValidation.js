@@ -67,6 +67,26 @@ const DEFAULTS = {
   // when the next ask is further above the bid than this, the asks above are
   // the outliers and the low ask stands.
   maxAskToBidRatio: 3,
+  // The sell follows the ask, but the ask is not always a market: when every
+  // seller is a bot parked at an absurd price there is no undercut to skip,
+  // and the pricer copied the herd (The Triple Jumper sold at 52 ref against
+  // a 23.66 ref buy for two days). With at least minBids bids, the sell is
+  // capped at the highest of buy x (1 + maxAboveBuyPct), buy +
+  // maxAboveBuyMetal (so cheap items keep their weapon-or-two spread) and the
+  // bptf community sell x (1 + maxAboveBaselinePct). See modules/sellAnchor.js.
+  sellAnchor: {
+    enabled: true,
+    minBids: 3,
+    maxAboveBuyPct: 0.6,
+    maxAboveBuyMetal: 0.66,
+    maxAboveBaselinePct: 0.25,
+  },
+  // The no-bid sell-only rule (buy 0.05 under the ask) exists for junk cases
+  // that trade at a weapon or two. A hat with no bids at all is not a market:
+  // above this ask it keeps its last price instead of going out as 0.05 / ask.
+  sellOnly: {
+    maxAskWithoutBidsMetal: 1,
+  },
   priceSwingLimits: {
     maxBuyIncrease: 0.1,
     maxSellDecrease: 0.1,

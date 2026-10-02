@@ -112,6 +112,14 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 | `maxPercentageDifferences.sell` | number | `-8` | Maximum percentage difference for sell prices vs baseline  |
 | `priceSwingLimits.maxBuyIncrease` | number | `0.1` | Maximum buy price increase (10%)                        |
 | `priceSwingLimits.maxSellDecrease` | number | `0.1` | Maximum sell price decrease (10%)                      |
+| `sellAnchor.enabled` | boolean | `true` | Cap the sell price relative to the buy price (see below) |
+| `sellAnchor.minBids` | number | `3` | Only cap when at least this many bids back the buy price |
+| `sellAnchor.maxAboveBuyPct` | number | `0.6` | Sell may be at most this fraction above the buy (0.6 = 60%) |
+| `sellAnchor.maxAboveBuyMetal` | number | `0.66` | Flat allowance in ref over the buy, so cheap items keep a weapon-or-two spread |
+| `sellAnchor.maxAboveBaselinePct` | number | `0.25` | The cap is at least this fraction over the bptf community sell, when there is one |
+| `sellOnly.maxAskWithoutBidsMetal` | number | `1` | With no bids at all, an item is priced from the ask alone (buy 0.05) only when the ask is at most this many ref |
+
+`sellAnchor` stops the pricer copying an ask side made of bots parked at an absurd price: with enough bids, the sell is capped at the highest of buy × (1 + `maxAboveBuyPct`), buy + `maxAboveBuyMetal` and the bptf community sell × (1 + `maxAboveBaselinePct`), rounded down to a whole weapon. `sellOnly.maxAskWithoutBidsMetal` keeps an item that momentarily has no bids on its last price instead of pricing it 0.05 / ask; the no-bid rule is meant for junk that trades at a weapon or two.
 
 **Note**: `priceAllItems` and `fallbackOntoPricesTf` have been removed from the public release. Users must manually add items through the GUI or `item_list.json`.
 
