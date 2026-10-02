@@ -11,7 +11,8 @@
 //     "items": {
 //       "5875;6;c108": { "sellAddMetal": 1, "buyDropMetal": 0.11, "note": "mptf 60/75" },
 //       "30753;6":     { "buyCapMetal": 1.27, "sellFloorMetal": 0, "note": "craftHat buy ≤ 1.27" },
-//       "30469;6":     { "buyAddWeapons": 1, "buyAddMinMetal": 1.22, "note": "Lia out of stock" }
+//       "30469;6":     { "buyAddWeapons": 1, "buyAddMinMetal": 1.22, "note": "Lia out of stock" },
+//       "18000;6;c111": { "minSpreadMetal": 0.55, "note": "spread ≥ 0.55 ref" }
 //     },
 //     "global": {
 //       "minSpreadMetal": 0.22,                          // sell - buy >= this; sell is raised
@@ -21,6 +22,11 @@
 //
 // Per SKU (pricelist-ui's group rules) and per grade (global) the same two
 // knobs exist, a buy ceiling and a sell floor, applied by the same helpers.
+//
+// A SKU's own minSpreadMetal (pricelist-ui's per-item Min spread) replaces the
+// global minimum spread for that item and is taken as set: the spread
+// percentage cap does not apply to it, since it exists for items that need
+// MORE room than the global rule gives them (keyless cases).
 //
 // Out of stock: pricelist-ui marks the SKUs a bot has none of with
 // buyAddWeapons (whole weapons, 1 = half a scrap) and buyAddMinMetal. The buy
@@ -188,7 +194,8 @@ function load() {
       const sides = parseSides(adj);
       const buyAddWeapons = Math.max(0, Math.round(Number(adj.buyAddWeapons) || 0));
       const buyAddMinMetal = Math.max(0, Number(adj.buyAddMinMetal) || 0);
-      if (sellAdd === 0 && buyDrop === 0 && !sides.buyCapMetal && !sides.sellFloorMetal && !buyAddWeapons) {
+      const minSpreadMetal = Math.max(0, Number(adj.minSpreadMetal) || 0);
+      if (sellAdd === 0 && buyDrop === 0 && !sides.buyCapMetal && !sides.sellFloorMetal && !buyAddWeapons && !minSpreadMetal) {
         continue;
       }
       items.set(sku, {
@@ -197,6 +204,7 @@ function load() {
         ...sides,
         buyAddWeapons,
         buyAddMinMetal,
+        minSpreadMetal,
         note: adj.note || '',
       });
     }
@@ -308,7 +316,7 @@ function floorSell(out, floor, effects, why) {
 // Minimum spread (in weapons): the sell price is raised to buy + spread; the
 // buy price is never lowered for this. A market spread that already covers
 // the requirement is left exactly as it is.
-function keepSpread(out, weapons, effects) {
+function keepSpread(out, weapons, effects, why = '') {
   if (!(weapons > 0)) return;
   const keyMetal = keyMetalNow();
   if ((usesKeys(out.buy) || usesKeys(out.sell)) && !(keyMetal > 0)) return warnKeyMetal();
@@ -318,7 +326,7 @@ function keepSpread(out, weapons, effects) {
   const { keys, rest } = splitKeys(buyM + spread, keyMetal);
   out.sell.keys = keys;
   out.sell.metal = round(rest);
-  effects.push(`sell raised to buy + ${round(spread)} ref`);
+  effects.push(`sell raised to buy + ${round(spread)} ref${why ? ` (${why})` : ''}`);
 }
 
 // a < b, in metal when the key price is known, else keys first, then metal
@@ -354,7 +362,7 @@ function bumpBuy(out, item, adj, effects) {
 
 // Returns the item as the bots should see it. Untouched items come back as-is.
 // Order: the SKU's stock adjustments, buy ceilings (group, then grade), the
-// spread, sell floors (group, then grade), then the out-of-stock buy bump,
+// spread (the SKU's own, else the global one), sell floors (group, then grade), then the out-of-stock buy bump,
 // which nothing before it takes into account.
 // What the bots see for the key. tf2autobot values keys a buyer pays with at
 // the key BUY price, and keys it hands out at the key SELL price, so a buy
@@ -415,7 +423,11 @@ function apply(item) {
       out.buy.metal = round(rest);
     }
   }
-  if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpreadWeapons(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
+  // The SKU's own spread wins over the global one and is not capped. It is
+  // taken to the nearest weapon: ref values are truncated decimals (0.55 ref
+  // is 5 scrap = 10 weapons, 9.9 by plain arithmetic).
+  if (adj && adj.minSpreadMetal > 0) keepSpread(out, toWeapons(adj.minSpreadMetal), effects, 'item spread');
+  else if (g && g.minSpreadMetal > 0) keepSpread(out, cappedSpreadWeapons(g.minSpreadMetal, marketSellMetal, spreadPct), effects);
   if (adj && adj.sellFloorMetal) floorSell(out, adj.sellFloorMetal, effects, 'group');
   if (gr && gr.sellFloorMetal) floorSell(out, gr.sellFloorMetal, effects, grade);
   if (adj && adj.buyAddWeapons > 0) bumpBuy(out, item, adj, effects);
@@ -509,6 +521,7 @@ function describeAdjustment(adj) {
   if (adj.buyCapMetal) parts.push(`buy ≤ ${adj.buyCapMetal} ref`);
   if (adj.sellFloorMetal) parts.push(`sell ≥ ${adj.sellFloorMetal} ref`);
   if (adj.buyAddWeapons) parts.push(`buy +${adj.buyAddWeapons / 2} scrap when > ${adj.buyAddMinMetal} ref`);
+  if (adj.minSpreadMetal) parts.push(`spread ≥ ${adj.minSpreadMetal} ref`);
   return parts.join(', ') + (adj.note ? ` (${adj.note})` : '');
 }
 
@@ -543,7 +556,8 @@ function watch(onChange) {
           a.buyCapMetal !== b.buyCapMetal ||
           a.sellFloorMetal !== b.sellFloorMetal ||
           a.buyAddWeapons !== b.buyAddWeapons ||
-          a.buyAddMinMetal !== b.buyAddMinMetal);
+          a.buyAddMinMetal !== b.buyAddMinMetal ||
+          a.minSpreadMetal !== b.minSpreadMetal);
       if (!a !== !b || moved) {
         changed.push(sku);
       }
