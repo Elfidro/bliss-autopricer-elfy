@@ -1140,30 +1140,21 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, ma
     // rejecting the 1.44 ref asks as outliers for days.
     //
     // In a locked market (the best bid meets the ask) the sell is the first
-    // ask above the best bid instead, or a margin over the bid when no ask is
-    // above it (chooseMarket). The sell-only branch keeps the market ask.
+    // ask above the best bid instead, or a margin over the bid when no ask
+    // within maxAskToBidRatio is above it (chooseMarket). The sell-only branch
+    // keeps the market ask. No per-item log line here: ~128 items are locked
+    // at any time and the note on the result reaches the dashboard.
     let marketNote = '';
     if (sellFiltered.length > 0) {
       let picked = sellFiltered[Math.min(askIndex, sellFiltered.length - 1)];
       if (!sellOnly && market.sellFrom === 'next-ask') {
         picked = sellFiltered[market.sellIndex];
-        console.log(
-          `| UPDATING PRICES |: ${name} locked market: best bid ${market.bid} ref meets the ` +
-            `${market.ask} ref ask, selling at the next ask ${market.sell} ref.`
-        );
         marketNote = `Locked market: selling at the next ask ${market.sell} ref`;
       } else if (!sellOnly && market.sellFrom === 'margin') {
         picked = null;
-        const pct = Number(config.minSellMarginPercent) || 0.03;
-        const margin = Math.max(config.minSellMargin ?? 0.11, Methods.getRight(market.bid * pct));
-        const sellMetal = Methods.getRight(market.bid + margin);
         final_sellObj =
-          sku === '5021;6' ? { keys: 0, metal: sellMetal } : metalToCurrencies(sellMetal);
-        console.log(
-          `| UPDATING PRICES |: ${name} locked market: best bid ${market.bid} ref meets the ` +
-            `${market.ask} ref ask and no ask is above it, selling at bid + ${margin} = ${sellMetal} ref.`
-        );
-        marketNote = `Locked market, no ask above the bid: selling at bid + ${margin} ref`;
+          sku === '5021;6' ? { keys: 0, metal: market.sell } : metalToCurrencies(market.sell);
+        marketNote = `Locked market, no usable ask above the bid: selling at ${market.sell} ref`;
       }
 
       if (picked) {

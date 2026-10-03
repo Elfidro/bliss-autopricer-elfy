@@ -54,8 +54,9 @@ const DEFAULTS = {
   excludedListingDescriptions: [],
   blockedAttributes: {},
   minSellMargin: 0.11,
-  // When the best bids meet the lowest ask, buy at ask minus this share of it
-  // (never less than minSellMargin).
+  // In a locked market with no usable ask above the best bid, sell at the bid
+  // plus this share of it (never less than minSellMargin). Also the margin the
+  // pricer keeps when a buy would come out at or above the sell.
   minSellMarginPercent: 0.03,
   // backpack.tf prices some craft hats in "hats"; value of one hat in ref.
   hatPriceRef: 1.33,

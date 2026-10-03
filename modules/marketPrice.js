@@ -13,6 +13,13 @@ function num(v, fallback) {
   return v !== null && v !== undefined && v !== '' && Number.isFinite(n) ? n : fallback;
 }
 
+// Same rounding as Methods.getRight: nearest weapon, written as 2 dp.
+function toWeaponNotation(v) {
+  const halfScraps = Math.round(v * 18);
+  const scrap = halfScraps / 2;
+  return Math.floor(Math.round((scrap / 9) * 10000) / 100) / 100;
+}
+
 // Index of the ask to price against. `asks` is ascending and `bids` is any
 // order, both in metal.
 //
@@ -119,8 +126,9 @@ function robustBestBid(bids, ask, opts = {}) {
 //   sellFrom 'ask'      the market ask (sellIndex = askIndex)
 //   sellFrom 'next-ask' the market is locked, `sell` is the first ask above the
 //                       best bid (sellIndex is its index in `asks`)
-//   sellFrom 'margin'   locked with no ask above the bid: sell is null, the
-//                       caller adds a margin over the bid
+//   sellFrom 'margin'   locked with no usable ask above the bid: `sell` is the
+//                       bid + max(marginMetal, marginPct of the bid), rounded
+//                       to a weapon (sellIndex -1)
 //   sellFrom 'none'     no asks at all: sell is null
 //
 // Bids above the ask are mostly for a painted/spelled/parted variant the
@@ -137,6 +145,12 @@ function robustBestBid(bids, ask, opts = {}) {
 // best bid, so it is 29.88 / 30. Non-Craftable Tour of Duty Ticket (bids 26,
 // asks 26 x7, 26.22) is 26 / 26.22 instead of selling under the best bid;
 // Veteran's Attire (bids 65.54 x3, asks 65.32, 68.54 x4) is 65.54 / 68.54.
+//
+// The next ask is only used when it is within maxAskToBidRatio of the bid, the
+// same test chooseAskIndex uses for junk asks. Defiant Spartan had bids at
+// 1.22-1.33, asks 1.33, 26 and 28: the 26 ref ask is a bot parked at a junk
+// price, not where the item sells, so the sell is the margin over the bid
+// (1.33 + 0.11 = 1.44) instead.
 function chooseMarket(asks, bids, opts = {}) {
   const askList = asks || [];
   const allBids = (bids || []).filter((b) => Number.isFinite(b)).sort((a, b) => b - a);
@@ -169,13 +183,17 @@ function chooseMarket(asks, bids, opts = {}) {
   let sellFrom = 'ask';
   let sellIndex = askIndex;
   if (locked) {
+    const ratio = num(opts.maxAskToBidRatio, 3);
     sellIndex = askList.findIndex((a) => a > bid + 0.005);
-    if (sellIndex >= 0) {
+    if (sellIndex >= 0 && askList[sellIndex] <= bid * ratio) {
       sell = askList[sellIndex];
       sellFrom = 'next-ask';
     } else {
-      sell = null;
+      const marginMetal = num(opts.marginMetal, 0.11);
+      const marginPct = num(opts.marginPct, 0.03);
+      sell = toWeaponNotation(bid + Math.max(marginMetal, toWeaponNotation(bid * marginPct)));
       sellFrom = 'margin';
+      sellIndex = -1;
     }
   }
 
@@ -194,13 +212,15 @@ function chooseMarket(asks, bids, opts = {}) {
 }
 
 // chooseMarket options from the pricer config (config.json keys
-// isolatedAskGap, maxAskToBidRatio and marketModel). Missing values fall back
-// to the defaults above.
+// isolatedAskGap, maxAskToBidRatio, minSellMargin, minSellMarginPercent and
+// marketModel). Missing values fall back to the defaults above.
 function marketOptions(config = {}) {
   const m = (config && config.marketModel) || {};
   return {
     gap: config?.isolatedAskGap,
     maxAskToBidRatio: config?.maxAskToBidRatio,
+    marginMetal: config?.minSellMargin,
+    marginPct: config?.minSellMarginPercent,
     lockTolerancePct: m.lockTolerancePct,
     supportPct: m.supportPct,
     minSupport: m.minSupport,

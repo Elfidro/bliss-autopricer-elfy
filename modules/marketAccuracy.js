@@ -10,7 +10,8 @@
 //   ask = where the market sells: the market ask (the lowest sell listing, or
 //         the next one up when the lowest is an isolated undercut), or, when
 //         the market is locked (best bid >= ask), the first ask above the best
-//         bid. A locked row is flagged with `locked`.
+//         bid, or the bid plus the sell margin when there is no usable one. A
+//         locked row is flagged with `locked`.
 // and the pricer's buy/sell are judged against them.
 
 const fs = require('fs');
@@ -33,10 +34,8 @@ const buyTolerance = (bid) => Math.max(0.11, bid * 0.02);
 
 const isNil = (v) => v === null || v === undefined;
 
-// Strict comparisons on purpose: in a locked market with no ask above the
-// best bid (bid == ask, common when a buying bot and a selling bot will not
-// trade with each other) the pricer buys at the bid, which is also the ask, so
-// buying at the ask or selling at the bid is on the market, not over/under it.
+// Strict comparisons on purpose: buying exactly where the market sells or
+// selling exactly at the best bid is on the market, not over/under it.
 function classify(row) {
   if (isNil(row.bid) || isNil(row.ask)) {
     return 'no-market';
@@ -99,10 +98,9 @@ async function computeAccuracy(db) {
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
     const asks = m.sell.slice().sort((a, b) => a - b);
     const mk = chooseMarket(asks, m.buy, opts);
-    // Where the market sells: the next ask above the best bid when locked,
-    // else the market ask. A locked market with no ask above the bid has no
-    // such price; the market ask stands in for it.
-    const ask = isNil(mk.sell) ? mk.ask : mk.sell;
+    // Where the market sells (chooseMarket's sell): the market ask, or the
+    // next ask / bid + margin when locked. null only with no asks at all.
+    const ask = mk.sell;
     const row = {
       name: item.name,
       sku: item.sku,

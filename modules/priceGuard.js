@@ -33,7 +33,8 @@ const finitePositive = (v) => typeof v === 'number' && Number.isFinite(v) && v >
 //   buy, sell   the price the item has now
 //   bid         the supported best bid (chooseMarket(...).bid), or null
 //   marketSell  where the market sells (chooseMarket(...).sell: the market ask,
-//               or the next ask up when locked), or null
+//               or the next ask up / bid + margin when locked), or null when
+//               there are no asks
 //   opts.minBuyMetal  the smallest buy price (default 0.05, one weapon)
 //
 // - sell under the bid: raise the sell to the market sell, and at least a

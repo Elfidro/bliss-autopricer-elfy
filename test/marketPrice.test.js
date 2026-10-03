@@ -151,6 +151,42 @@ test('chooseAskIndex - Defiant Spartan: the bids back the low ask, the junk asks
   const m = chooseMarket(asks, bids);
   assert.equal(m.askIndex, 0);
   assert.equal(m.ask, 1.33);
+  // The 1.33 bid meets the 1.33 ask, and the next ask (26) is a junk price far
+  // over 3x the bid: sell a margin over the bid, 1.33 + 0.11.
+  assert.equal(m.bid, 1.33);
+  assert.equal(m.locked, true);
+  assert.equal(m.sellFrom, 'margin');
+  assert.equal(m.sell, 1.44);
+  assert.equal(m.sellIndex, -1);
+});
+
+test('locked: the next ask is used only within maxAskToBidRatio of the bid', () => {
+  const inside = chooseMarket([10, 29], [10, 10]);
+  assert.equal(inside.locked, true);
+  assert.equal(inside.sellFrom, 'next-ask');
+  assert.equal(inside.sell, 29);
+
+  // 31 > 10 x 3: margin. 3% of 10 is 0.3 ref, which rounds to 0.27 (five
+  // weapons) like Methods.getRight, so the sell is 10.27.
+  const outside = chooseMarket([10, 31], [10, 10]);
+  assert.equal(outside.locked, true);
+  assert.equal(outside.sellFrom, 'margin');
+  assert.equal(outside.sell, 10.27);
+
+  // The ratio and margins come from the options.
+  const wider = chooseMarket([10, 31], [10, 10], { maxAskToBidRatio: 4 });
+  assert.equal(wider.sell, 31);
+  const flat = chooseMarket([10, 31], [10, 10], { marginMetal: 0.5, marginPct: 0 });
+  assert.equal(flat.sell, 10.5);
+});
+
+test('a bid within lockTolerancePct above the ask is the bid, and the market is locked', () => {
+  const m = chooseMarket([10], [10.4, 10.3]);
+  assert.deepEqual(m.bids, [10.4, 10.3]);
+  assert.equal(m.bid, 10.4);
+  assert.equal(m.locked, true);
+  assert.equal(m.sellFrom, 'margin');
+  assert.ok(m.sell > m.bid);
 });
 
 test('chooseAskIndex - Wet Works: an isolated undercut is skipped', () => {
@@ -182,11 +218,11 @@ test('a variant bid above the lock ceiling is dropped, one a hair over the ask i
   assert.equal(locked.sellFrom, 'next-ask');
 });
 
-test('locked with no ask above the bid: sellFrom margin, no sell', () => {
+test('locked with no ask above the bid: sell a margin over the bid', () => {
   const m = chooseMarket([1.55, 1.55], times(1.55, 3));
   assert.equal(m.locked, true);
   assert.equal(m.bid, 1.55);
-  assert.equal(m.sell, null);
+  assert.equal(m.sell, 1.66);
   assert.equal(m.sellFrom, 'margin');
   assert.equal(m.sellIndex, -1);
 });
@@ -236,11 +272,15 @@ test('marketOptions maps the config', () => {
   const opts = marketOptions({
     isolatedAskGap: 0.3,
     maxAskToBidRatio: 4,
+    minSellMargin: 0.22,
+    minSellMarginPercent: 0.05,
     marketModel: { lockTolerancePct: 0.02, supportPct: 0.03, minSupport: 3, askProximityPct: 0.05 },
   });
   assert.deepEqual(opts, {
     gap: 0.3,
     maxAskToBidRatio: 4,
+    marginMetal: 0.22,
+    marginPct: 0.05,
     lockTolerancePct: 0.02,
     supportPct: 0.03,
     minSupport: 3,
