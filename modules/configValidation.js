@@ -103,6 +103,15 @@ const DEFAULTS = {
     maxBidAboveMetal: 0.33,
     maxBuyRisePct: 0.25,
     maxBuyRiseMetal: 0.33,
+    // Hard cap: nothing is bought or sold above hardCapMultiplier x the median
+    // over longWindowHours (needs longMinRows rows, a day of cycles). The
+    // daily ramp slows a pump, the hard cap bounds it: 25% a day compounds to
+    // 2x in about three days. A legitimate doubling within a week can only be
+    // followed once the 7-day median itself has moved (about 3.5 days at the
+    // new level). The sell cap never pushes the sell to or under the buy.
+    longWindowHours: 168,
+    longMinRows: 96,
+    hardCapMultiplier: 2,
   },
   // The sell follows the ask, but the ask is not always a market: when every
   // seller is a bot parked at an absurd price there is no undercut to skip,

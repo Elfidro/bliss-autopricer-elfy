@@ -171,20 +171,31 @@ function robustBestBid(bids, ask, opts = {}) {
 // is above the anchor ceiling (the honest asks are gone). Bids above the
 // anchor ceiling are also kept out of chooseAskIndex.
 //
+// opts.hardBuyCap (historyAnchor.hardBuyCap: 2x the 7-day median buy, or
+// null) is a second, hard bid ceiling on top: the 24 h ceiling moves with a
+// patient pump (25% a day compounds to 2x in about three days), the hard cap
+// does not. Bids above it are dropped and counted the same way.
+//
 // The ask is credible (opts.askCredible for robustBestBid) when it is under
-// the anchor ceiling or, without an anchor, when a second ask sits within 10%
-// above it: Standing Offer's 19.33 has 19.55 behind it, a lone 19.33 has
-// nothing to back it.
+// the 24 h anchor ceiling or, without a 24 h anchor, when a second ask sits
+// within 10% above it: Standing Offer's 19.33 has 19.55 behind it, a lone
+// 19.33 has nothing to back it.
 function chooseMarket(asks, bids, opts = {}) {
   const askList = asks || [];
   const sortedBids = (bids || []).filter((b) => Number.isFinite(b)).sort((a, b) => b - a);
-  const anchorSell = Number(opts.anchorSell);
-  const ceilingByAnchor =
-    opts.anchorSell !== null && opts.anchorSell !== undefined && anchorSell > 0
-      ? anchorCeiling({ sell: anchorSell }, opts)
-      : null;
+  const given = (v) => v !== null && v !== undefined && Number(v) > 0;
+  const ceilingByAnchor = given(opts.anchorSell)
+    ? anchorCeiling({ sell: Number(opts.anchorSell) }, opts)
+    : null;
+  const hardCap = given(opts.hardBuyCap) ? Number(opts.hardBuyCap) : null;
+  // The lowest of the history ceilings, or null without any.
+  const historyCeiling =
+    ceilingByAnchor === null && hardCap === null
+      ? null
+      : Math.min(ceilingByAnchor ?? Infinity, hardCap ?? Infinity);
   const hasAnchor = ceilingByAnchor !== null;
-  const allBids = hasAnchor ? sortedBids.filter((b) => b <= ceilingByAnchor) : sortedBids;
+  const allBids =
+    historyCeiling === null ? sortedBids : sortedBids.filter((b) => b <= historyCeiling);
   const askIndex = chooseAskIndex(askList, allBids, opts);
   const ask = askList.length ? askList[askIndex] : null;
 
@@ -200,7 +211,7 @@ function chooseMarket(asks, bids, opts = {}) {
       sell: null,
       sellFrom: 'none',
       sellIndex: -1,
-      bidCeiling: hasAnchor ? ceilingByAnchor : Infinity,
+      bidCeiling: historyCeiling === null ? Infinity : historyCeiling,
       droppedAboveAnchor: sortedBids.length - allBids.length,
       junkAsk: false,
     };
@@ -208,11 +219,12 @@ function chooseMarket(asks, bids, opts = {}) {
 
   const lockTolerance = num(opts.lockTolerancePct, 0.05);
   const lockCeiling = ask * (1 + lockTolerance);
-  const bidCeiling = hasAnchor ? Math.min(lockCeiling, ceilingByAnchor) : lockCeiling;
+  const bidCeiling = historyCeiling === null ? lockCeiling : Math.min(lockCeiling, historyCeiling);
   const realBids = allBids.filter((b) => b <= bidCeiling);
-  const droppedAboveAnchor = hasAnchor
-    ? sortedBids.filter((b) => b > ceilingByAnchor && b <= lockCeiling).length
-    : 0;
+  const droppedAboveAnchor =
+    historyCeiling === null
+      ? 0
+      : sortedBids.filter((b) => b > historyCeiling && b <= lockCeiling).length;
   const junkAsk = hasAnchor && ask > ceilingByAnchor;
   const nextAsk = askList[askIndex + 1];
   const askCredible = hasAnchor ? !junkAsk : nextAsk !== undefined && nextAsk <= ask * 1.1;
@@ -256,13 +268,16 @@ function chooseMarket(asks, bids, opts = {}) {
 // chooseMarket options from the pricer config (config.json keys
 // isolatedAskGap, maxAskToBidRatio, minSellMargin, minSellMarginPercent,
 // marketModel and historyAnchor). Missing values fall back to the defaults
-// above. The per-item anchorSell is added by the caller.
+// above. The per-item anchorSell and hardBuyCap are added by the caller
+// (hardCapMultiplier is carried so historyAnchor.hardBuyCap can take these
+// options too).
 function marketOptions(config = {}) {
   const m = (config && config.marketModel) || {};
   const h = (config && config.historyAnchor) || {};
   return {
     maxBidAbovePct: h.maxBidAbovePct,
     maxBidAboveMetal: h.maxBidAboveMetal,
+    hardCapMultiplier: h.hardCapMultiplier,
     gap: config?.isolatedAskGap,
     maxAskToBidRatio: config?.maxAskToBidRatio,
     marginMetal: config?.minSellMargin,

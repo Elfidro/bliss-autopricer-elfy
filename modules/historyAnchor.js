@@ -22,6 +22,14 @@
 // is never reinforced, because nothing here raises a price. That is the
 // opposite of the old self-anchoring sell rule, which rejected every ask that
 // disagreed with recent sells and kept The Birdcage at 40 ref for days.
+//
+// The hard cap (hardBuyCap / hardSellCap): the ramp compounds - a patient
+// pump reaches 2x in about three days at 25% a day - so a second, longer
+// anchor (the median over longWindowHours, a week) bounds it: nothing is
+// bought or sold above hardCapMultiplier times that median. The daily ramp
+// slows a pump, the hard cap bounds it. A legitimate doubling within a week
+// can only be followed once the 7-day median itself has moved, i.e. after
+// about 3.5 days at the new level.
 
 const DEFAULTS = {
   enabled: true,
@@ -31,6 +39,9 @@ const DEFAULTS = {
   maxBidAboveMetal: 0.33,
   maxBuyRisePct: 0.25,
   maxBuyRiseMetal: 0.33,
+  longWindowHours: 168,
+  longMinRows: 96,
+  hardCapMultiplier: 2,
 };
 
 function num(v, fallback) {
@@ -54,31 +65,65 @@ function toWeaponNotation(v) {
   return Math.floor(Math.round((scrap / 9) * 10000) / 100) / 100;
 }
 
-// sku -> { buy, sell, n }: the median buy and sell over the last windowHours
-// of price_history, for SKUs with at least minRows rows. Read once per cycle,
-// before that cycle's rows are inserted (one query, ~135 ms on 583k rows).
+// sku -> { buy, sell, n, longBuy, longSell, longN }: the median buy and sell
+// over the last windowHours of price_history (null with fewer than minRows
+// rows), and over the last longWindowHours (null with fewer than longMinRows
+// rows). SKUs with neither are left out. Read once per cycle, before that
+// cycle's rows are inserted, in one query: the short window is a FILTER on
+// the long one's rows.
 async function loadAnchors(db, opts) {
   const o = options(opts);
   const anchors = new Map();
   if (!o.enabled) {
     return anchors;
   }
+  const longHours = Math.max(o.longWindowHours, o.windowHours);
   const rows = await db.any(
     `SELECT sku,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal) AS buy,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal) AS sell,
-            count(*)::int AS n
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal)
+              FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) AS buy,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal)
+              FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) AS sell,
+            (count(*) FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')))::int AS n,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal) AS long_buy,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal) AS long_sell,
+            count(*)::int AS long_n
        FROM price_history
-      WHERE timestamp > now() - ($1 * interval '1 hour')
+      WHERE timestamp > now() - ($3 * interval '1 hour')
       GROUP BY sku
-     HAVING count(*) >= $2`,
-    [o.windowHours, o.minRows]
+     HAVING count(*) FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) >= $2
+         OR count(*) >= $4`,
+    [o.windowHours, o.minRows, longHours, o.longMinRows]
   );
+  const positive = (v) => {
+    const n = Number(v);
+    return v !== null && v !== undefined && n > 0 ? n : null;
+  };
   for (const r of rows) {
-    const buy = Number(r.buy);
-    const sell = Number(r.sell);
-    if (buy > 0 && sell > 0) {
-      anchors.set(r.sku, { buy, sell, n: Number(r.n) });
+    const n = Number(r.n) || 0;
+    const longN = Number(r.long_n) || 0;
+    const short = n >= o.minRows;
+    const long = longN >= o.longMinRows;
+    const entry = {
+      buy: short ? positive(r.buy) : null,
+      sell: short ? positive(r.sell) : null,
+      n,
+      longBuy: long ? positive(r.long_buy) : null,
+      longSell: long ? positive(r.long_sell) : null,
+      longN,
+    };
+    const hasShort = entry.buy !== null && entry.sell !== null;
+    const hasLong = entry.longBuy !== null && entry.longSell !== null;
+    if (!hasShort) {
+      entry.buy = null;
+      entry.sell = null;
+    }
+    if (!hasLong) {
+      entry.longBuy = null;
+      entry.longSell = null;
+    }
+    if (hasShort || hasLong) {
+      anchors.set(r.sku, entry);
     }
   }
   return anchors;
@@ -119,10 +164,50 @@ function rampCap(anchor, opts) {
   return toWeaponNotation(Math.max(byPct, byMetal) / 18);
 }
 
+// hardCapMultiplier times a median, in half scraps like rampCap, rounded
+// DOWN to a whole weapon.
+function timesMedian(median, opts) {
+  if (!(median > 0)) {
+    return null;
+  }
+  const o = options(opts);
+  const base = Math.round(median * 18);
+  return toWeaponNotation(Math.floor(base * o.hardCapMultiplier + 1e-9) / 18);
+}
+
+// The highest buy ever allowed: hardCapMultiplier x the long (7 d) median buy.
+// null without a long anchor.
+function hardBuyCap(anchor, opts) {
+  return anchor ? timesMedian(anchor.longBuy, opts) : null;
+}
+
+// The highest sell ever allowed: hardCapMultiplier x the long median sell.
+// null without a long anchor.
+function hardSellCap(anchor, opts) {
+  return anchor ? timesMedian(anchor.longSell, opts) : null;
+}
+
+// Apply the hard sell cap, but never at or below the buy: when the capped
+// sell would not clear the buy by a weapon, the sell is left alone (the buy
+// cap already protects the money side) and `blocked` says so.
+//   -> { sell, capped, blocked }
+function limitSell(sellMetal, buyMetal, cap) {
+  if (cap === null || cap === undefined || !(sellMetal > cap + 0.005)) {
+    return { sell: sellMetal, capped: false, blocked: false };
+  }
+  if (Math.round(cap * 18) - Math.round(buyMetal * 18) < 1) {
+    return { sell: sellMetal, capped: false, blocked: true };
+  }
+  return { sell: cap, capped: true, blocked: false };
+}
+
 module.exports = {
   loadAnchors,
   ensureIndex,
   anchorCeiling,
   rampCap,
+  hardBuyCap,
+  hardSellCap,
+  limitSell,
   HISTORY_ANCHOR_DEFAULTS: DEFAULTS,
 };

@@ -67,7 +67,14 @@ const { recordStatus, getStatus, shortReason } = require('./modules/pricingStatu
 const { recordAccuracy } = require('./modules/marketAccuracy');
 const { chooseAskIndex, chooseMarket, marketOptions } = require('./modules/marketPrice');
 const { guardPrice } = require('./modules/priceGuard');
-const { loadAnchors, ensureIndex: ensureAnchorIndex, rampCap } = require('./modules/historyAnchor');
+const {
+  loadAnchors,
+  ensureIndex: ensureAnchorIndex,
+  rampCap,
+  hardBuyCap,
+  hardSellCap,
+  limitSell,
+} = require('./modules/historyAnchor');
 const { anchorSell, SELL_ANCHOR_DEFAULTS } = require('./modules/sellAnchor');
 const { priceKeyFromListings } = require('./modules/keyMarketPrice');
 
@@ -130,7 +137,7 @@ const updatedSkus = new Set();
 // query failed, which turns every anchor rule off.
 let cycleAnchors = new Map();
 // Per-cycle counts for the one [ANCHOR] summary line.
-const anchorStats = { rampCapped: 0, droppedAboveAnchor: 0 };
+const anchorStats = { rampCapped: 0, hardCappedBuys: 0, hardCappedSells: 0, droppedAboveAnchor: 0 };
 
 // sku -> consecutive cycles a price move has been held back by the swing guard.
 // Persisted to disk: the guard needs confirmCycles consecutive holds before it
@@ -488,6 +495,8 @@ const calculateAndEmitPrices = async () => {
     cycleAnchors = new Map();
   }
   anchorStats.rampCapped = 0;
+  anchorStats.hardCappedBuys = 0;
+  anchorStats.hardCappedSells = 0;
   anchorStats.droppedAboveAnchor = 0;
 
   // Only use items added through GUI or item_list.json
@@ -563,8 +572,10 @@ const calculateAndEmitPrices = async () => {
 
   const windowHours = Number(config.historyAnchor?.windowHours) || 24;
   console.log(
-    `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.droppedAboveAnchor} bids ` +
-      `dropped above the ${windowHours} h anchor (${cycleAnchors.size} SKUs anchored)`
+    `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.hardCappedBuys} buys ` +
+      `hard-capped, ${anchorStats.hardCappedSells} sells hard-capped, ` +
+      `${anchorStats.droppedAboveAnchor} bids dropped above the ${windowHours} h anchor ` +
+      `(${cycleAnchors.size} SKUs anchored)`
   );
 
   // Items that did not price this cycle keep their old price; make sure that
@@ -889,6 +900,7 @@ function readMarket(buyRows, sellRows, sku) {
   const market = chooseMarket(sellFiltered.map(priceOf), sortedBids.map(priceOf), {
     ...marketOptions(config),
     anchorSell: anchor ? anchor.sell : null,
+    hardBuyCap: hardBuyCap(anchor, config.historyAnchor),
   });
   // Same cut-off chooseMarket applied, so these rows are exactly market.bids.
   const buyFiltered = sortedBids.filter((l) => priceOf(l) <= market.bidCeiling);
@@ -1340,6 +1352,20 @@ const getAverages = async (
           `market bid ${buyMetal} ref, ${hours} h median ${Methods.getRight(anchor.buy)} ref`;
       }
     }
+    // Hard cap: never buy above hardCapMultiplier x the 7-day median buy. The
+    // ramp compounds (2x in about three days at 25% a day); this does not.
+    // chooseMarket already drops bids above it, so this is the backstop for
+    // a buy derived some other way.
+    let hardBuyNote = '';
+    const buyHardCap = hardBuyCap(anchor, config.historyAnchor);
+    const multiplier = Number(config.historyAnchor?.hardCapMultiplier) || 2;
+    const longDays = Math.round((Number(config.historyAnchor?.longWindowHours) || 168) / 24);
+    if (buyHardCap !== null && Methods.toMetal(final_buyObj, keyobj.metal) > buyHardCap + 0.005) {
+      final_buyObj =
+        sku === '5021;6' ? { keys: 0, metal: buyHardCap } : metalToCurrencies(buyHardCap);
+      anchorStats.hardCappedBuys++;
+      hardBuyNote = `Buy hard-capped at ${multiplier}x the ${longDays} d median (${buyHardCap} ref)`;
+    }
     const dropNote = market.droppedAboveAnchor
       ? `${market.droppedAboveAnchor} bid(s) above the ${Number(config.historyAnchor?.windowHours) || 24} h anchor ignored`
       : '';
@@ -1382,6 +1408,31 @@ const getAverages = async (
             `selling at ${cap} ref instead.`
         );
         anchorNote = `Sell anchored: ask ${askMetal} ref far above bids`;
+      }
+    }
+
+    // Hard cap on the final sell, on every path (the sell-only path kept a
+    // junk ask as its sell): never above hardCapMultiplier x the 7-day median
+    // sell - but never at or below the buy either. When the cap would not
+    // clear the buy by a weapon the sell is left alone; the buy cap already
+    // protects the money side.
+    let hardSellNote = '';
+    const sellHardCap = hardSellCap(anchor, config.historyAnchor);
+    if (sellHardCap !== null) {
+      const limited = limitSell(
+        Methods.toMetal(final_sellObj, keyobj.metal),
+        Methods.toMetal(final_buyObj, keyobj.metal),
+        sellHardCap
+      );
+      if (limited.capped) {
+        final_sellObj =
+          sku === '5021;6' ? { keys: 0, metal: limited.sell } : metalToCurrencies(limited.sell);
+        anchorStats.hardCappedSells++;
+        hardSellNote = `Sell hard-capped at ${multiplier}x the ${longDays} d median (${sellHardCap} ref)`;
+      } else if (limited.blocked) {
+        hardSellNote =
+          `Sell above ${multiplier}x the ${longDays} d median (${sellHardCap} ref) left as is: ` +
+          `the cap would not clear the buy`;
       }
     }
 
@@ -1444,7 +1495,9 @@ const getAverages = async (
         );
       }
       const result = [final_buyObj, final_sellObj];
-      const note = [marketNote, dropNote, rampNote, anchorNote].filter(Boolean).join('; ');
+      const note = [marketNote, dropNote, rampNote, hardBuyNote, anchorNote, hardSellNote]
+        .filter(Boolean)
+        .join('; ');
       if (note) {
         result.note = note;
       }

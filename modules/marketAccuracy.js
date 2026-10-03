@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { getBaseConfigManager } = require('./baseConfigManager');
 const { chooseMarket, marketOptions } = require('./marketPrice');
-const { loadAnchors } = require('./historyAnchor');
+const { loadAnchors, hardBuyCap } = require('./historyAnchor');
 
 const PRICELIST_PATH = path.resolve(__dirname, '../files/pricelist.json');
 
@@ -109,7 +109,11 @@ async function computeAccuracy(db) {
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
     const asks = m.sell.slice().sort((a, b) => a - b);
     const anchor = anchors.get(item.sku);
-    const mk = chooseMarket(asks, m.buy, { ...opts, anchorSell: anchor ? anchor.sell : null });
+    const mk = chooseMarket(asks, m.buy, {
+      ...opts,
+      anchorSell: anchor ? anchor.sell : null,
+      hardBuyCap: hardBuyCap(anchor, config.historyAnchor),
+    });
     // Where the market sells (chooseMarket's sell): the market ask, or the
     // next ask / bid + margin when locked. null only with no asks at all.
     const ask = mk.sell;

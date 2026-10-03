@@ -274,11 +274,13 @@ test('marketOptions maps the config', () => {
     maxAskToBidRatio: 4,
     minSellMargin: 0.22,
     minSellMarginPercent: 0.05,
+    historyAnchor: { hardCapMultiplier: 3 },
     marketModel: { lockTolerancePct: 0.02, supportPct: 0.03, minSupport: 3, askProximityPct: 0.05 },
   });
   assert.deepEqual(opts, {
     maxBidAbovePct: undefined,
     maxBidAboveMetal: undefined,
+    hardCapMultiplier: 3,
     gap: 0.3,
     maxAskToBidRatio: 4,
     marginMetal: 0.22,
