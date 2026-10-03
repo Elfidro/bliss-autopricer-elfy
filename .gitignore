@@ -142,3 +142,5 @@ files/price-policy.json
 bptf-prices.json
 cached-pricelist.json
 files/swing-streaks.json
+files/anchors.json
+files/.anchors.json.*.tmp

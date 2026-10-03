@@ -130,10 +130,38 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 | `historyAnchor.minRows` | number | `8` | A SKU needs at least this many `price_history` rows in the window to have an anchor |
 | `historyAnchor.maxBidAbovePct` / `maxBidAboveMetal` | number | `0.5` / `0.33` | Bids above anchor sell × (1 + pct), or anchor sell + metal if larger, are ignored |
 | `historyAnchor.maxBuyRisePct` / `maxBuyRiseMetal` | number | `0.25` / `0.33` | The buy may be at most anchor buy × (1 + pct), or anchor buy + metal if larger (rounded down to a weapon) |
+| `historyAnchor.longWindowHours` | number | `168` | Window of the long median published in `files/anchors.json` (not used for pricing) |
+| `historyAnchor.longMinRows` | number | `96` | A SKU needs at least this many rows in the long window to have a long median (a day of cycles) |
 
 How the market is read (`modules/marketPrice.js`): the buy price is the best *supported* bid - the highest bid that another bid within `supportPct` backs, or that sits within `askProximityPct` under the ask - so a lone bid far above the pack is not copied and a crowd of lowballers does not drag the buy down. When the best bid meets the lowest ask (a locked market) the sell is the first ask above the best bid when it is at most `lockedNextAskMaxPct` above the bid, otherwise the best bid plus `minSellMargin` / `minSellMarginPercent`. Items that did not price in a cycle (baseline rejection, swing hold, error) are still checked against the live market: a sell under the best bid is raised and a buy over the market sell is lowered (`modules/priceGuard.js`).
 
 `historyAnchor` (`modules/historyAnchor.js`) defends against pumped markets: someone buys out the honest asks, leaving only junk asks far above the real price, and walks the bids up a few percent per cycle - too slowly for the swing guard. Each cycle reads the median buy and sell of the last `windowHours` of `price_history` per SKU. Bids far above the median sell are dropped, a lone bid near a junk ask no longer counts as supported, and the buy may rise at most `maxBuyRisePct` (min `maxBuyRiseMetal`) over the median buy. The anchor only ever limits upward buy moves, so a wrong-low anchor costs missed purchases while the price catches up (a 3 -> 18 ref move takes about 8 days at 25% a day); a wrong-high anchor is never reinforced. Each cycle logs one `[ANCHOR]` summary line.
+
+### Files shared with other apps
+
+The pricer and pricelist-ui exchange state through files under `files/` (all gitignored runtime state):
+
+| File | Written by | Contents |
+| ---- | ---------- | -------- |
+| `files/pricelist.json` | pricer | The market prices, one entry per SKU |
+| `files/price-policy.json` | pricelist-ui | Stock-aware adjustments the pricer applies when emitting (`modules/pricePolicy.js`) |
+| `files/anchors.json` | pricer, every cycle | The `historyAnchor` medians of our own prices, for pricelist-ui's inflow guard |
+
+`files/anchors.json` is written atomically (temp file + rename) right after the anchors are loaded, and not at all when the anchor is off or the query fails:
+
+```json
+{
+  "updatedAt": "2026-10-03T12:00:00.000Z",
+  "windowHours": 24,
+  "longWindowHours": 168,
+  "keyMetal": 60.11,
+  "anchors": {
+    "31516;6": { "buy": 3.4, "sell": 3.5, "n": 96, "longBuy": 3.33, "longSell": 3.44, "longN": 640 }
+  }
+}
+```
+
+Numbers are rounded to 2 dp; `buy`/`sell` are null when the SKU has fewer than `minRows` rows in the last `windowHours`, `longBuy`/`longSell` when it has fewer than `longMinRows` in the last `longWindowHours`. SKUs with neither are left out.
 
 `sellAnchor` stops the pricer copying an ask side made of bots parked at an absurd price: with enough bids, the sell is capped at the highest of buy × (1 + `maxAboveBuyPct`), buy + `maxAboveBuyMetal` and the bptf community sell × (1 + `maxAboveBaselinePct`), rounded down to a whole weapon. `sellOnly.maxAskWithoutBidsMetal` keeps an item that momentarily has no bids on its last price instead of pricing it 0.05 / ask; the no-bid rule is meant for junk that trades at a weapon or two.
 

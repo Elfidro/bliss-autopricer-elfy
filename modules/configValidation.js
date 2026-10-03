@@ -107,6 +107,11 @@ const DEFAULTS = {
     maxBidAboveMetal: 0.33,
     maxBuyRisePct: 0.25,
     maxBuyRiseMetal: 0.33,
+    // A second, longer median (needs longMinRows rows, a day of cycles). Not
+    // used for pricing: it is published with the 24 h one in
+    // files/anchors.json for pricelist-ui's inflow guard.
+    longWindowHours: 168,
+    longMinRows: 96,
   },
   // The sell follows the ask, but the ask is not always a market: when every
   // seller is a bot parked at an absurd price there is no undercut to skip,

@@ -43,7 +43,9 @@
     "maxBidAbovePct": 0.5,
     "maxBidAboveMetal": 0.33,
     "maxBuyRisePct": 0.25,
-    "maxBuyRiseMetal": 0.33
+    "maxBuyRiseMetal": 0.33,
+    "longWindowHours": 168,
+    "longMinRows": 96
   },
   "sellAnchor": {
     "enabled": true,

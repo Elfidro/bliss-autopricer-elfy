@@ -14,6 +14,8 @@ const PriceWatcher = require('./modules/PriceWatcher'); //outdated price logging
 const SCHEMA_PATH = './schema.json';
 // Paths to the pricelist and item list files.
 const PRICELIST_PATH = './files/pricelist.json';
+// The 24 h / 7 d medians, published each cycle for pricelist-ui's inflow guard.
+const ANCHORS_PATH = './files/anchors.json';
 const ITEM_LIST_PATH = './files/item_list.json';
 const { listen, socketIO, setSchemaManager } = require('./API/server.js');
 const { setWebSocketStatsProvider } = require('./API/routes/websocket-status.js');
@@ -67,7 +69,12 @@ const { recordStatus, getStatus, shortReason } = require('./modules/pricingStatu
 const { recordAccuracy } = require('./modules/marketAccuracy');
 const { chooseAskIndex, chooseMarket, marketOptions } = require('./modules/marketPrice');
 const { guardPrice } = require('./modules/priceGuard');
-const { loadAnchors, ensureIndex: ensureAnchorIndex, rampCap } = require('./modules/historyAnchor');
+const {
+  loadAnchors,
+  writeAnchorsFile,
+  ensureIndex: ensureAnchorIndex,
+  rampCap,
+} = require('./modules/historyAnchor');
 const { anchorSell, SELL_ANCHOR_DEFAULTS } = require('./modules/sellAnchor');
 const { priceKeyFromListings } = require('./modules/keyMarketPrice');
 
@@ -486,6 +493,19 @@ const calculateAndEmitPrices = async () => {
   } catch (err) {
     console.error('[ANCHOR] could not load the 24 h price anchors:', err.message);
     cycleAnchors = new Map();
+  }
+  // Publish them for pricelist-ui. Skipped when the anchor is off or the
+  // query failed (an empty file would read as "no item has a normal price").
+  if (cycleAnchors.size > 0) {
+    try {
+      writeAnchorsFile(cycleAnchors, ANCHORS_PATH, {
+        windowHours: Number(config.historyAnchor?.windowHours) || 24,
+        longWindowHours: Number(config.historyAnchor?.longWindowHours) || 168,
+        keyMetal: keyobj ? keyobj.metal : null,
+      });
+    } catch (err) {
+      console.error(`[ANCHOR] could not write ${ANCHORS_PATH}:`, err.message);
+    }
   }
   anchorStats.rampCapped = 0;
   anchorStats.droppedAboveAnchor = 0;

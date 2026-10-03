@@ -23,6 +23,9 @@
 // opposite of the old self-anchoring sell rule, which rejected every ask that
 // disagreed with recent sells and kept The Birdcage at 40 ref for days.
 
+const fs = require('fs');
+const path = require('path');
+
 const DEFAULTS = {
   enabled: true,
   windowHours: 24,
@@ -31,6 +34,8 @@ const DEFAULTS = {
   maxBidAboveMetal: 0.33,
   maxBuyRisePct: 0.25,
   maxBuyRiseMetal: 0.33,
+  longWindowHours: 168,
+  longMinRows: 96,
 };
 
 function num(v, fallback) {
@@ -54,31 +59,66 @@ function toWeaponNotation(v) {
   return Math.floor(Math.round((scrap / 9) * 10000) / 100) / 100;
 }
 
-// sku -> { buy, sell, n }: the median buy and sell over the last windowHours
-// of price_history, for SKUs with at least minRows rows. Read once per cycle,
-// before that cycle's rows are inserted (one query, ~135 ms on 583k rows).
+// sku -> { buy, sell, n, longBuy, longSell, longN }: the median buy and sell
+// over the last windowHours of price_history (null with fewer than minRows
+// rows), and over the last longWindowHours (null with fewer than longMinRows
+// rows). SKUs with neither are left out. Read once per cycle, before that
+// cycle's rows are inserted, in one query: the short window is a FILTER on
+// the long one's rows. Pricing uses buy / sell only; the long window is
+// published for pricelist-ui (writeAnchorsFile).
 async function loadAnchors(db, opts) {
   const o = options(opts);
   const anchors = new Map();
   if (!o.enabled) {
     return anchors;
   }
+  const longHours = Math.max(o.longWindowHours, o.windowHours);
   const rows = await db.any(
     `SELECT sku,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal) AS buy,
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal) AS sell,
-            count(*)::int AS n
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal)
+              FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) AS buy,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal)
+              FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) AS sell,
+            (count(*) FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')))::int AS n,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY buy_metal) AS long_buy,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY sell_metal) AS long_sell,
+            count(*)::int AS long_n
        FROM price_history
-      WHERE timestamp > now() - ($1 * interval '1 hour')
+      WHERE timestamp > now() - ($3 * interval '1 hour')
       GROUP BY sku
-     HAVING count(*) >= $2`,
-    [o.windowHours, o.minRows]
+     HAVING count(*) FILTER (WHERE timestamp > now() - ($1 * interval '1 hour')) >= $2
+         OR count(*) >= $4`,
+    [o.windowHours, o.minRows, longHours, o.longMinRows]
   );
+  const positive = (v) => {
+    const n = Number(v);
+    return v !== null && v !== undefined && n > 0 ? n : null;
+  };
   for (const r of rows) {
-    const buy = Number(r.buy);
-    const sell = Number(r.sell);
-    if (buy > 0 && sell > 0) {
-      anchors.set(r.sku, { buy, sell, n: Number(r.n) });
+    const n = Number(r.n) || 0;
+    const longN = Number(r.long_n) || 0;
+    const short = n >= o.minRows;
+    const long = longN >= o.longMinRows;
+    const entry = {
+      buy: short ? positive(r.buy) : null,
+      sell: short ? positive(r.sell) : null,
+      n,
+      longBuy: long ? positive(r.long_buy) : null,
+      longSell: long ? positive(r.long_sell) : null,
+      longN,
+    };
+    const hasShort = entry.buy !== null && entry.sell !== null;
+    const hasLong = entry.longBuy !== null && entry.longSell !== null;
+    if (!hasShort) {
+      entry.buy = null;
+      entry.sell = null;
+    }
+    if (!hasLong) {
+      entry.longBuy = null;
+      entry.longSell = null;
+    }
+    if (hasShort || hasLong) {
+      anchors.set(r.sku, entry);
     }
   }
   return anchors;
@@ -119,8 +159,53 @@ function rampCap(anchor, opts) {
   return toWeaponNotation(Math.max(byPct, byMetal) / 18);
 }
 
+// Publish the anchors for other local processes (pricelist-ui's inflow guard
+// caps a bot's buy at the item's normal price when it suddenly accumulates
+// it). Written atomically - a temp file renamed over the old one - so a
+// reader never sees half a file. Every number is rounded to 2 dp; null stays
+// null. meta: { windowHours, longWindowHours, keyMetal }.
+function writeAnchorsFile(anchors, filePath, meta = {}) {
+  const r2 = (v) =>
+    v === null || v === undefined || !Number.isFinite(Number(v))
+      ? null
+      : Math.round(Number(v) * 100) / 100;
+  const out = {};
+  for (const [sku, a] of anchors || []) {
+    out[sku] = {
+      buy: r2(a.buy),
+      sell: r2(a.sell),
+      n: Number(a.n) || 0,
+      longBuy: r2(a.longBuy),
+      longSell: r2(a.longSell),
+      longN: Number(a.longN) || 0,
+    };
+  }
+  const doc = {
+    updatedAt: new Date().toISOString(),
+    windowHours: r2(meta.windowHours),
+    longWindowHours: r2(meta.longWindowHours),
+    keyMetal: r2(meta.keyMetal),
+    anchors: out,
+  };
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(doc));
+  try {
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // Already gone.
+    }
+    throw err;
+  }
+  return doc;
+}
+
 module.exports = {
   loadAnchors,
+  writeAnchorsFile,
   ensureIndex,
   anchorCeiling,
   rampCap,
