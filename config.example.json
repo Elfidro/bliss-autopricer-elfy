@@ -33,7 +33,8 @@
     "lockTolerancePct": 0.05,
     "supportPct": 0.05,
     "minSupport": 2,
-    "askProximityPct": 0.1
+    "askProximityPct": 0.1,
+    "lockedNextAskMaxPct": 0.25
   },
   "historyAnchor": {
     "enabled": true,

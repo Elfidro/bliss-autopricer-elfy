@@ -160,24 +160,45 @@ test('chooseAskIndex - Defiant Spartan: the bids back the low ask, the junk asks
   assert.equal(m.sellIndex, -1);
 });
 
-test('locked: the next ask is used only within maxAskToBidRatio of the bid', () => {
-  const inside = chooseMarket([10, 29], [10, 10]);
+test('locked: the next ask is used only within lockedNextAskMaxPct of the bid', () => {
+  // 12.44 is 24.4% over the bid: inside the 25% band.
+  const inside = chooseMarket([10, 12.44], [10, 10]);
   assert.equal(inside.locked, true);
   assert.equal(inside.sellFrom, 'next-ask');
-  assert.equal(inside.sell, 29);
+  assert.equal(inside.sell, 12.44);
 
-  // 31 > 10 x 3: margin. 3% of 10 is 0.3 ref, which rounds to 0.27 (five
-  // weapons) like Methods.getRight, so the sell is 10.27.
-  const outside = chooseMarket([10, 31], [10, 10]);
+  // 29 is under 3x the bid (the old rule) but far outside the band: margin.
+  // 3% of 10 is 0.3 ref, which rounds to 0.27 (five weapons) like
+  // Methods.getRight, so the sell is 10.27.
+  const outside = chooseMarket([10, 29], [10, 10]);
   assert.equal(outside.locked, true);
   assert.equal(outside.sellFrom, 'margin');
   assert.equal(outside.sell, 10.27);
+  assert.equal(chooseMarket([10, 31], [10, 10]).sell, 10.27);
 
-  // The ratio and margins come from the options.
-  const wider = chooseMarket([10, 31], [10, 10], { maxAskToBidRatio: 4 });
-  assert.equal(wider.sell, 31);
+  // The band and margins come from the options.
+  const wider = chooseMarket([10, 29], [10, 10], { lockedNextAskMaxPct: 2 });
+  assert.equal(wider.sell, 29);
   const flat = chooseMarket([10, 31], [10, 10], { marginMetal: 0.5, marginPct: 0 });
   assert.equal(flat.sell, 10.5);
+});
+
+test('Fizzy Pharmacist: a locked market with a junk next ask sells at the margin', () => {
+  // Bids 23.33 meet the 23.33 ask; the only ask above is 49.33 (111% up).
+  const m = chooseMarket([23.33, 49.33], times(23.33, 3));
+  assert.equal(m.bid, 23.33);
+  assert.equal(m.locked, true);
+  assert.equal(m.sellFrom, 'margin');
+  // 23.33 + max(0.11, 3% of 23.33 = 0.70 -> 0.72) = 24.05.
+  assert.equal(m.sell, 24.05);
+});
+
+test('The Lightning Lid: not locked, sells at the honest 36.77 ask', () => {
+  const m = chooseMarket([36.77, 36.77, 51.11], times(33.88, 3));
+  assert.equal(m.locked, false);
+  assert.equal(m.bid, 33.88);
+  assert.equal(m.sellFrom, 'ask');
+  assert.equal(m.sell, 36.77);
 });
 
 test('a bid within lockTolerancePct above the ask is the bid, and the market is locked', () => {
@@ -274,7 +295,13 @@ test('marketOptions maps the config', () => {
     maxAskToBidRatio: 4,
     minSellMargin: 0.22,
     minSellMarginPercent: 0.05,
-    marketModel: { lockTolerancePct: 0.02, supportPct: 0.03, minSupport: 3, askProximityPct: 0.05 },
+    marketModel: {
+      lockTolerancePct: 0.02,
+      supportPct: 0.03,
+      minSupport: 3,
+      askProximityPct: 0.05,
+      lockedNextAskMaxPct: 0.2,
+    },
   });
   assert.deepEqual(opts, {
     maxBidAbovePct: undefined,
@@ -284,6 +311,7 @@ test('marketOptions maps the config', () => {
     marginMetal: 0.22,
     marginPct: 0.05,
     lockTolerancePct: 0.02,
+    lockedNextAskMaxPct: 0.2,
     supportPct: 0.03,
     minSupport: 3,
     askProximityPct: 0.05,

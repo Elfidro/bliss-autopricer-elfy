@@ -155,11 +155,16 @@ function robustBestBid(bids, ask, opts = {}) {
 // asks 26 x7, 26.22) is 26 / 26.22 instead of selling under the best bid;
 // Veteran's Attire (bids 65.54 x3, asks 65.32, 68.54 x4) is 65.54 / 68.54.
 //
-// The next ask is only used when it is within maxAskToBidRatio of the bid, the
-// same test chooseAskIndex uses for junk asks. Defiant Spartan had bids at
-// 1.22-1.33, asks 1.33, 26 and 28: the 26 ref ask is a bot parked at a junk
-// price, not where the item sells, so the sell is the margin over the bid
-// (1.33 + 0.11 = 1.44) instead.
+// The next ask is only used when it is at most `lockedNextAskMaxPct` (25%)
+// above the bid; otherwise the sell is the margin over the bid. Defiant
+// Spartan had bids at 1.22-1.33, asks 1.33, 26 and 28: the 26 ref ask is a
+// bot parked at a junk price, so the sell is 1.33 + 0.11 = 1.44. A 3x band
+// (maxAskToBidRatio, as chooseAskIndex uses) was too loose: Fizzy Pharmacist
+// had bids up to 23.33 meeting asks at 23.33 and the only ask above was
+// 49.33, under 3x, so it went out at 49.33 (37.27 after anchorSell) and the
+// swing guard then held the correction for an hour. Fast Food sold at 36.38
+// against 22.88 asks the same way. The band keeps the honest next asks:
+// Private Eye 1.55 -> 1.77 is 14%, Veteran's Attire 65.54 -> 68.54 is 5%.
 //
 // opts.anchorSell is the median of our own sell over the last 24 h
 // (modules/historyAnchor.js), or null. With it, bids above anchorCeiling are
@@ -223,9 +228,9 @@ function chooseMarket(asks, bids, opts = {}) {
   let sellFrom = 'ask';
   let sellIndex = askIndex;
   if (locked) {
-    const ratio = num(opts.maxAskToBidRatio, 3);
+    const band = num(opts.lockedNextAskMaxPct, 0.25);
     sellIndex = askList.findIndex((a) => a > bid + 0.005);
-    if (sellIndex >= 0 && askList[sellIndex] <= bid * ratio) {
+    if (sellIndex >= 0 && askList[sellIndex] <= bid * (1 + band)) {
       sell = askList[sellIndex];
       sellFrom = 'next-ask';
     } else {
@@ -268,6 +273,7 @@ function marketOptions(config = {}) {
     marginMetal: config?.minSellMargin,
     marginPct: config?.minSellMarginPercent,
     lockTolerancePct: m.lockTolerancePct,
+    lockedNextAskMaxPct: m.lockedNextAskMaxPct,
     supportPct: m.supportPct,
     minSupport: m.minSupport,
     askProximityPct: m.askProximityPct,

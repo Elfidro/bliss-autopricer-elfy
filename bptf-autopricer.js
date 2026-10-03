@@ -1189,7 +1189,7 @@ const getAverages = async (
     //
     // In a locked market (the best bid meets the ask) the sell is the first
     // ask above the best bid instead, or a margin over the bid when no ask
-    // within maxAskToBidRatio is above it (chooseMarket). The sell-only branch
+    // within lockedNextAskMaxPct is above it (chooseMarket). The sell-only branch
     // keeps the market ask. No per-item log line here: ~128 items are locked
     // at any time and the note on the result reaches the dashboard.
     let marketNote = '';

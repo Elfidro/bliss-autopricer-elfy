@@ -82,6 +82,10 @@ const DEFAULTS = {
     supportPct: 0.05,
     minSupport: 2,
     askProximityPct: 0.1,
+    // In a locked market the next ask up is the sell only when it is at most
+    // this fraction above the best bid, else bid + minSellMargin. A 3x band let
+    // Fizzy Pharmacist (bids and asks at 23.33, next ask 49.33) sell at 49.33.
+    lockedNextAskMaxPct: 0.25,
   },
   // A 24 h history anchor (modules/historyAnchor.js): the median of our own
   // buy and sell over the last windowHours, for SKUs with at least minRows
