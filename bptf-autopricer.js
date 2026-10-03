@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const pLimit = require('p-limit').default; // For limiting concurrent operations
 const Schema = require('@tf2autobot/tf2-schema');
+require('./modules/schemaNameFix'); // before any name lookup
 const EnhancedSchemaManager = require('./modules/steamSchemaManager');
 const methods = require('./methods');
 const Methods = new methods();
