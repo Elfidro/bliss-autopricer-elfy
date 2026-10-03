@@ -8,6 +8,8 @@
 // Pure: no I/O, no config reads (marketOptions maps a config object to the
 // options). All prices are in metal.
 
+const { anchorCeiling } = require('./historyAnchor');
+
 function num(v, fallback) {
   const n = Number(v);
   return v !== null && v !== undefined && v !== '' && Number.isFinite(n) ? n : fallback;
@@ -85,6 +87,12 @@ function chooseAskIndex(asks, bids = [], opts = {}) {
 // This replaced the z-score outlier filter too, which deleted the honest top
 // bids whenever a crowd of lowballers sat far below them.
 //
+// The ask-proximity rule needs an ask that is itself credible: under attack
+// the honest asks are bought out and a lone bid placed 10% under a junk ask
+// would be "supported" by it (asks [49], bids [45] -> buy 45). chooseMarket
+// works that out and passes opts.askCredible; false switches the proximity
+// rule off. Omitted means credible.
+//
 // When nothing is supported (only possible with fewer bids than minSupport)
 // the second-highest bid is used - a price at least two bidders would pay - or
 // the only bid when there is one. null when there are no bids.
@@ -96,7 +104,7 @@ function robustBestBid(bids, ask, opts = {}) {
   const supportPct = num(opts.supportPct, 0.05);
   const minSupport = num(opts.minSupport, 2);
   const proximity = num(opts.askProximityPct, 0.1);
-  const hasAsk = Number.isFinite(ask) && ask > 0;
+  const hasAsk = Number.isFinite(ask) && ask > 0 && opts.askCredible !== false;
 
   for (const bid of list) {
     if (hasAsk && bid >= ask * (1 - proximity)) {
@@ -119,7 +127,8 @@ function robustBestBid(bids, ask, opts = {}) {
 
 // The whole market for an item. `asks` is ascending, `bids` any order, both in
 // metal. Returns
-//   { askIndex, ask, bid, bids, nBids, locked, sell, sellFrom, sellIndex, bidCeiling }
+//   { askIndex, ask, bid, bids, nBids, locked, sell, sellFrom, sellIndex,
+//     bidCeiling, droppedAboveAnchor, junkAsk }
 // where `ask` is the market ask (chooseAskIndex), `bids` the real bids
 // (descending), `bid` the supported best bid (robustBestBid), and `sell` the
 // price to sell at:
@@ -151,9 +160,31 @@ function robustBestBid(bids, ask, opts = {}) {
 // 1.22-1.33, asks 1.33, 26 and 28: the 26 ref ask is a bot parked at a junk
 // price, not where the item sells, so the sell is the margin over the bid
 // (1.33 + 0.11 = 1.44) instead.
+//
+// opts.anchorSell is the median of our own sell over the last 24 h
+// (modules/historyAnchor.js), or null. With it, bids above anchorCeiling are
+// not bids for this item either: when the honest asks of Snug Sharpshooter (a
+// 3.3 ref hat) were bought out, only junk asks at 45-50 ref were left, the
+// variant ceiling moved up to ~51 ref and every fake bid under it passed.
+// The bid ceiling is then the lower of the two, `droppedAboveAnchor` counts
+// the bids only the anchor removed, and `junkAsk` says the market ask itself
+// is above the anchor ceiling (the honest asks are gone). Bids above the
+// anchor ceiling are also kept out of chooseAskIndex.
+//
+// The ask is credible (opts.askCredible for robustBestBid) when it is under
+// the anchor ceiling or, without an anchor, when a second ask sits within 10%
+// above it: Standing Offer's 19.33 has 19.55 behind it, a lone 19.33 has
+// nothing to back it.
 function chooseMarket(asks, bids, opts = {}) {
   const askList = asks || [];
-  const allBids = (bids || []).filter((b) => Number.isFinite(b)).sort((a, b) => b - a);
+  const sortedBids = (bids || []).filter((b) => Number.isFinite(b)).sort((a, b) => b - a);
+  const anchorSell = Number(opts.anchorSell);
+  const ceilingByAnchor =
+    opts.anchorSell !== null && opts.anchorSell !== undefined && anchorSell > 0
+      ? anchorCeiling({ sell: anchorSell }, opts)
+      : null;
+  const hasAnchor = ceilingByAnchor !== null;
+  const allBids = hasAnchor ? sortedBids.filter((b) => b <= ceilingByAnchor) : sortedBids;
   const askIndex = chooseAskIndex(askList, allBids, opts);
   const ask = askList.length ? askList[askIndex] : null;
 
@@ -169,14 +200,23 @@ function chooseMarket(asks, bids, opts = {}) {
       sell: null,
       sellFrom: 'none',
       sellIndex: -1,
-      bidCeiling: Infinity,
+      bidCeiling: hasAnchor ? ceilingByAnchor : Infinity,
+      droppedAboveAnchor: sortedBids.length - allBids.length,
+      junkAsk: false,
     };
   }
 
   const lockTolerance = num(opts.lockTolerancePct, 0.05);
-  const bidCeiling = ask * (1 + lockTolerance);
+  const lockCeiling = ask * (1 + lockTolerance);
+  const bidCeiling = hasAnchor ? Math.min(lockCeiling, ceilingByAnchor) : lockCeiling;
   const realBids = allBids.filter((b) => b <= bidCeiling);
-  const bid = robustBestBid(realBids, ask, opts);
+  const droppedAboveAnchor = hasAnchor
+    ? sortedBids.filter((b) => b > ceilingByAnchor && b <= lockCeiling).length
+    : 0;
+  const junkAsk = hasAnchor && ask > ceilingByAnchor;
+  const nextAsk = askList[askIndex + 1];
+  const askCredible = hasAnchor ? !junkAsk : nextAsk !== undefined && nextAsk <= ask * 1.1;
+  const bid = robustBestBid(realBids, ask, { ...opts, askCredible });
   const locked = bid !== null && bid >= ask - 0.005;
 
   let sell = ask;
@@ -208,15 +248,21 @@ function chooseMarket(asks, bids, opts = {}) {
     sellFrom,
     sellIndex,
     bidCeiling,
+    droppedAboveAnchor,
+    junkAsk,
   };
 }
 
 // chooseMarket options from the pricer config (config.json keys
-// isolatedAskGap, maxAskToBidRatio, minSellMargin, minSellMarginPercent and
-// marketModel). Missing values fall back to the defaults above.
+// isolatedAskGap, maxAskToBidRatio, minSellMargin, minSellMarginPercent,
+// marketModel and historyAnchor). Missing values fall back to the defaults
+// above. The per-item anchorSell is added by the caller.
 function marketOptions(config = {}) {
   const m = (config && config.marketModel) || {};
+  const h = (config && config.historyAnchor) || {};
   return {
+    maxBidAbovePct: h.maxBidAbovePct,
+    maxBidAboveMetal: h.maxBidAboveMetal,
     gap: config?.isolatedAskGap,
     maxAskToBidRatio: config?.maxAskToBidRatio,
     marginMetal: config?.minSellMargin,

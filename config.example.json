@@ -35,6 +35,15 @@
     "minSupport": 2,
     "askProximityPct": 0.1
   },
+  "historyAnchor": {
+    "enabled": true,
+    "windowHours": 24,
+    "minRows": 8,
+    "maxBidAbovePct": 0.5,
+    "maxBidAboveMetal": 0.33,
+    "maxBuyRisePct": 0.25,
+    "maxBuyRiseMetal": 0.33
+  },
   "sellAnchor": {
     "enabled": true,
     "minBids": 3,

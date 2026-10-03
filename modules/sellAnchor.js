@@ -13,8 +13,13 @@
 // allowance instead, since a 0.33 ref item legitimately sells at 0.66 (100%
 // over). The bptf community sell can raise the allowance: when the baseline
 // says the item is worth more than the bids suggest, the cap is at least
-// `maxAboveBaselinePct` over the baseline. With fewer than `minBids` bids the
-// buy is not trustworthy enough to anchor to, so nothing is capped.
+// `maxAboveBaselinePct` over the baseline. Our own 24 h median sell
+// (`anchorSellMetal`, modules/historyAnchor.js) raises it the same way. With
+// fewer than `minBids` bids the buy is not trustworthy enough to anchor to, so
+// nothing is capped - unless the caller says the ask is junk (`junkAsk`: the
+// market ask is far above our own recent sell, the honest asks are gone).
+// Then two honest bids under a 49 ref junk ask are enough to say the ask is
+// not the market.
 //
 // Pure: no I/O, no config reads. All prices are in metal.
 
@@ -38,9 +43,12 @@ function num(v, fallback) {
   return v !== null && v !== undefined && v !== '' && Number.isFinite(n) ? n : fallback;
 }
 
-// anchorSell({ buyMetal, sellMetal, baselineSellMetal, nBids }, opts)
+// anchorSell({ buyMetal, sellMetal, baselineSellMetal, nBids, anchorSellMetal, junkAsk }, opts)
 //   -> { sellMetal, capped, reason }
-function anchorSell({ buyMetal, sellMetal, baselineSellMetal, nBids } = {}, opts = {}) {
+function anchorSell(
+  { buyMetal, sellMetal, baselineSellMetal, nBids, anchorSellMetal, junkAsk } = {},
+  opts = {}
+) {
   const unchanged = (reason) => ({ sellMetal, capped: false, reason });
 
   if (opts && opts.enabled === false) {
@@ -50,7 +58,7 @@ function anchorSell({ buyMetal, sellMetal, baselineSellMetal, nBids } = {}, opts
     return unchanged('no usable buy/sell');
   }
   const minBids = num(opts.minBids, DEFAULTS.minBids);
-  if (!(Number(nBids) >= minBids)) {
+  if (!(Number(nBids) >= minBids) && junkAsk !== true) {
     return unchanged(`only ${nBids} bid(s), need ${minBids} to anchor`);
   }
 
@@ -61,6 +69,9 @@ function anchorSell({ buyMetal, sellMetal, baselineSellMetal, nBids } = {}, opts
   let cap = Math.max(buyMetal * (1 + pct), buyMetal + flat);
   if (Number.isFinite(baselineSellMetal) && baselineSellMetal > 0) {
     cap = Math.max(cap, baselineSellMetal * (1 + basePct));
+  }
+  if (Number.isFinite(anchorSellMetal) && anchorSellMetal > 0) {
+    cap = Math.max(cap, anchorSellMetal * (1 + basePct));
   }
 
   if (!(sellMetal > cap + 0.005)) {

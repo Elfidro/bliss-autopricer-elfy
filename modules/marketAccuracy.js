@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { getBaseConfigManager } = require('./baseConfigManager');
 const { chooseMarket, marketOptions } = require('./marketPrice');
+const { loadAnchors } = require('./historyAnchor');
 
 const PRICELIST_PATH = path.resolve(__dirname, '../files/pricelist.json');
 
@@ -90,6 +91,16 @@ async function computeAccuracy(db) {
 
   const now = Date.now() / 1000;
   const opts = marketOptions(config);
+  // The same 24 h history anchor the pricer reads, so bids the pricer ignores
+  // as pumped are not the "best bid" here either.
+  let anchors = new Map();
+  if (config.historyAnchor?.enabled !== false) {
+    try {
+      anchors = await loadAnchors(db, config.historyAnchor);
+    } catch (err) {
+      console.error('[ACCURACY] could not load the 24 h price anchors:', err.message);
+    }
+  }
   const rows = [];
   for (const item of pricelist) {
     if (item.sku === '5021;6') {
@@ -97,7 +108,8 @@ async function computeAccuracy(db) {
     }
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
     const asks = m.sell.slice().sort((a, b) => a - b);
-    const mk = chooseMarket(asks, m.buy, opts);
+    const anchor = anchors.get(item.sku);
+    const mk = chooseMarket(asks, m.buy, { ...opts, anchorSell: anchor ? anchor.sell : null });
     // Where the market sells (chooseMarket's sell): the market ask, or the
     // next ask / bid + margin when locked. null only with no asks at all.
     const ask = mk.sell;

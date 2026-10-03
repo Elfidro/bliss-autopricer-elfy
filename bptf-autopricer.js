@@ -67,6 +67,7 @@ const { recordStatus, getStatus, shortReason } = require('./modules/pricingStatu
 const { recordAccuracy } = require('./modules/marketAccuracy');
 const { chooseAskIndex, chooseMarket, marketOptions } = require('./modules/marketPrice');
 const { guardPrice } = require('./modules/priceGuard');
+const { loadAnchors, ensureIndex: ensureAnchorIndex, rampCap } = require('./modules/historyAnchor');
 const { anchorSell, SELL_ANCHOR_DEFAULTS } = require('./modules/sellAnchor');
 const { priceKeyFromListings } = require('./modules/keyMarketPrice');
 
@@ -122,6 +123,14 @@ const blockedAttributes = config.blockedAttributes;
 const fallbackOntoPricesTf = config.fallbackOntoPricesTf;
 
 const updatedSkus = new Set();
+
+// sku -> { buy, sell, n }: the 24 h median of our own prices
+// (modules/historyAnchor.js), loaded at the start of every cycle before that
+// cycle's price_history rows are written. Empty when the anchor is off or the
+// query failed, which turns every anchor rule off.
+let cycleAnchors = new Map();
+// Per-cycle counts for the one [ANCHOR] summary line.
+const anchorStats = { rampCapped: 0, droppedAboveAnchor: 0 };
 
 // sku -> consecutive cycles a price move has been held back by the swing guard.
 // Persisted to disk: the guard needs confirmCycles consecutive holds before it
@@ -468,6 +477,19 @@ async function getKsItemNamesToPrice(db, allItemNames) {
 const calculateAndEmitPrices = async () => {
   await deleteOldListings(db);
 
+  // The 24 h history anchor, read before this cycle's prices are recorded.
+  try {
+    cycleAnchors =
+      config.historyAnchor?.enabled === false
+        ? new Map()
+        : await loadAnchors(db, config.historyAnchor);
+  } catch (err) {
+    console.error('[ANCHOR] could not load the 24 h price anchors:', err.message);
+    cycleAnchors = new Map();
+  }
+  anchorStats.rampCapped = 0;
+  anchorStats.droppedAboveAnchor = 0;
+
   // Only use items added through GUI or item_list.json
   // priceAllItems functionality removed for public release
   const itemNames = Array.from(getAllowedItemNames());
@@ -539,6 +561,12 @@ const calculateAndEmitPrices = async () => {
     )
   );
 
+  const windowHours = Number(config.historyAnchor?.windowHours) || 24;
+  console.log(
+    `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.droppedAboveAnchor} bids ` +
+      `dropped above the ${windowHours} h anchor (${cycleAnchors.size} SKUs anchored)`
+  );
+
   // Items that did not price this cycle keep their old price; make sure that
   // price does not cross the live market (modules/priceGuard.js).
   try {
@@ -606,6 +634,12 @@ schemaManager.init(async function (err) {
   // Update key object from pricedb.io
   await updateKeyObject();
   console.log(`Key object initialised from pricedb.io: ${JSON.stringify(keyobj)}`);
+  // The history anchor reads price_history by SKU and time.
+  try {
+    await ensureAnchorIndex(db);
+  } catch (err) {
+    console.error('[ANCHOR] could not create the price_history index:', err.message);
+  }
   // Calculate and emit prices on start up.
   await calculateAndEmitPrices();
   console.log('Prices calculated and emitted on startup.');
@@ -826,15 +860,17 @@ async function loadBook(name) {
   };
 }
 
-// Sort the book and pick the market (modules/marketPrice.js chooseMarket).
-// Returns the chooseMarket result plus the listing rows behind it:
-// buyFiltered = the real bids (descending), sellFiltered = every ask
-// (ascending), so market.askIndex / market.sellIndex index sellFiltered.
+// Sort the book and pick the market (modules/marketPrice.js chooseMarket),
+// with the item's 24 h history anchor when it has one. Returns the
+// chooseMarket result plus the listing rows behind it: buyFiltered = the real
+// bids (descending), sellFiltered = every ask (ascending), so market.askIndex
+// / market.sellIndex index sellFiltered. `anchor` is the item's anchor or null.
 //
 // Listings are ordered by price. Trusted steam ids only break ties: moving
 // them to the front regardless of price made the pricer average a trusted
 // bot's low bid, or copy a trusted bot's high ask, over the real market.
-function readMarket(buyRows, sellRows) {
+function readMarket(buyRows, sellRows, sku) {
+  const anchor = (sku && cycleAnchors.get(sku)) || null;
   const priceOf = (l) => Methods.toMetal(l.currencies, keyobj.metal);
   const trustRank = (l) => (prioritySteamIds.includes(l.steamid) ? 0 : 1);
   const priced = (rows) => rows.filter((l) => Number.isFinite(priceOf(l)));
@@ -850,14 +886,13 @@ function readMarket(buyRows, sellRows) {
     (a, b) => priceOf(b) - priceOf(a) || trustRank(a) - trustRank(b)
   );
 
-  const market = chooseMarket(
-    sellFiltered.map(priceOf),
-    sortedBids.map(priceOf),
-    marketOptions(config)
-  );
+  const market = chooseMarket(sellFiltered.map(priceOf), sortedBids.map(priceOf), {
+    ...marketOptions(config),
+    anchorSell: anchor ? anchor.sell : null,
+  });
   // Same cut-off chooseMarket applied, so these rows are exactly market.bids.
   const buyFiltered = sortedBids.filter((l) => priceOf(l) <= market.bidCeiling);
-  return { market, buyFiltered, sellFiltered };
+  return { market, buyFiltered, sellFiltered, anchor };
 }
 
 // Safety pass after the pricing loop. An item that was rejected, held or
@@ -903,12 +938,15 @@ async function guardUnpricedItems(itemNames, itemsToWrite, priceHistoryEntries, 
           if (buyRows.length === 0 && sellRows.length === 0) {
             return;
           }
-          const { market } = readMarket(buyRows, sellRows);
+          const { market } = readMarket(buyRows, sellRows, sku);
           const fix = guardPrice({
             buy: Methods.toMetal(entry.buy, keyobj.metal),
             sell: Methods.toMetal(entry.sell, keyobj.metal),
             bid: market.bid,
-            marketSell: market.sell,
+            // A junk ask (far above our own 24 h sell) is not where the item
+            // sells: raising a crossed sell to it would park the item at 49
+            // ref. Without it the sell goes one weapon over the best bid.
+            marketSell: market.junkAsk ? null : market.sell,
           });
           if (!fix) {
             return;
@@ -1081,11 +1119,12 @@ const determinePrice = async (name, sku) => {
   // when the bids meet the ask. sellFiltered may be empty when
   // priceWithoutSellListings is on - the sell price is then derived from the
   // buy price in getAverages.
-  const { market, buyFiltered, sellFiltered } = readMarket(buyRows, sellRows);
+  const { market, buyFiltered, sellFiltered, anchor } = readMarket(buyRows, sellRows, sku);
+  anchorStats.droppedAboveAnchor += market.droppedAboveAnchor || 0;
 
   try {
     // If the buyFiltered or sellFiltered arrays are empty, we throw an error.
-    let arr = await getAverages(name, buyFiltered, sellFiltered, sku, pricetfItem, market);
+    let arr = await getAverages(name, buyFiltered, sellFiltered, sku, pricetfItem, market, anchor);
     return arr;
   } catch (e) {
     throw new Error(e);
@@ -1093,8 +1132,17 @@ const determinePrice = async (name, sku) => {
 };
 
 // buyFiltered: the real bids, descending. sellFiltered: every ask, ascending.
-// market: the chooseMarket result for them (see readMarket).
-const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, market) => {
+// market: the chooseMarket result for them (see readMarket). anchor: the
+// item's 24 h history anchor, or null.
+const getAverages = async (
+  name,
+  buyFiltered,
+  sellFiltered,
+  sku,
+  pricetfItem,
+  market,
+  anchor = null
+) => {
   const askIndex = market.askIndex;
   // Initialise two objects to contain the items final buy and sell prices.
   var final_buyObj = {
@@ -1271,6 +1319,31 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, ma
       throw new Error(`| UPDATING PRICES |: ${name} not enough sell listings...`);
     }
 
+    // Ramp cap: the buy may rise at most maxBuyRisePct (min maxBuyRiseMetal)
+    // over our own 24 h median buy (modules/historyAnchor.js). The swing guard
+    // only sees one cycle's step, so a pump that walks the bids up 1-3% a
+    // cycle went straight through it: Snug Sharpshooter's buy crept 4.44 ->
+    // 6.5 ref in 16 hours, then jumped to 18 and 24, and Lia bought 50 of a
+    // 3.3 ref hat at 6.40 and 22.20. Only ever lowers the buy.
+    let rampNote = '';
+    const buyCap = rampCap(anchor, config.historyAnchor);
+    if (buyCap !== null) {
+      const buyMetal = Methods.toMetal(final_buyObj, keyobj.metal);
+      if (buyMetal > buyCap + 0.005) {
+        final_buyObj = sku === '5021;6' ? { keys: 0, metal: buyCap } : metalToCurrencies(buyCap);
+        anchorStats.rampCapped++;
+        const h = config.historyAnchor || {};
+        const risePct = Math.round(Number(h.maxBuyRisePct ?? 0.25) * 100);
+        const hours = Number(h.windowHours) || 24;
+        rampNote =
+          `Buy ramp-capped at +${risePct}%/${hours === 24 ? 'day' : `${hours} h`}: ` +
+          `market bid ${buyMetal} ref, ${hours} h median ${Methods.getRight(anchor.buy)} ref`;
+      }
+    }
+    const dropNote = market.droppedAboveAnchor
+      ? `${market.droppedAboveAnchor} bid(s) above the ${Number(config.historyAnchor?.windowHours) || 24} h anchor ignored`
+      : '';
+
     // Tie the sell to the bids: an ask side that is all bots at an absurd
     // price is not the market (modules/sellAnchor.js). Only on a real ask
     // (the market ask or the next ask up), not the sell-only, locked-margin or
@@ -1288,7 +1361,14 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, ma
           : null;
       const anchorOpts = config.sellAnchor || {};
       const anchored = anchorSell(
-        { buyMetal, sellMetal: askMetal, baselineSellMetal, nBids: market.nBids },
+        {
+          buyMetal,
+          sellMetal: askMetal,
+          baselineSellMetal,
+          nBids: market.nBids,
+          anchorSellMetal: anchor ? anchor.sell : null,
+          junkAsk: market.junkAsk === true,
+        },
         anchorOpts
       );
       if (anchored.capped) {
@@ -1364,7 +1444,7 @@ const getAverages = async (name, buyFiltered, sellFiltered, sku, pricetfItem, ma
         );
       }
       const result = [final_buyObj, final_sellObj];
-      const note = [marketNote, anchorNote].filter(Boolean).join('; ');
+      const note = [marketNote, dropNote, rampNote, anchorNote].filter(Boolean).join('; ');
       if (note) {
         result.note = note;
       }

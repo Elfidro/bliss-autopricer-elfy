@@ -83,6 +83,27 @@ const DEFAULTS = {
     minSupport: 2,
     askProximityPct: 0.1,
   },
+  // A 24 h history anchor (modules/historyAnchor.js): the median of our own
+  // buy and sell over the last windowHours, for SKUs with at least minRows
+  // price_history rows. Bids above anchor sell x (1 + maxBidAbovePct) (or
+  // + maxBidAboveMetal) are dropped, and the buy may rise at most
+  // maxBuyRisePct (or maxBuyRiseMetal) over the anchor buy per window. A pump
+  // walked Snug Sharpshooter's buy from 4.44 to 24 ref in 1-3% steps that the
+  // swing guard never saw, and Lia lost ~700 ref.
+  // The anchor only ever limits UPWARD buy moves and bids far above our own
+  // recent sell, so a wrong-low anchor costs missed purchases (a 3 -> 18 ref
+  // move takes ~8 days at 25%/day) while a wrong-high anchor is never
+  // reinforced - the opposite of the old self-anchoring sell rule that stuck
+  // The Birdcage at 40 ref.
+  historyAnchor: {
+    enabled: true,
+    windowHours: 24,
+    minRows: 8,
+    maxBidAbovePct: 0.5,
+    maxBidAboveMetal: 0.33,
+    maxBuyRisePct: 0.25,
+    maxBuyRiseMetal: 0.33,
+  },
   // The sell follows the ask, but the ask is not always a market: when every
   // seller is a bot parked at an absurd price there is no undercut to skip,
   // and the pricer copied the herd (The Triple Jumper sold at 52 ref against
