@@ -118,6 +118,14 @@ Each bot has its own `config.json` file in its directory with TF2Autobot setting
 | `sellAnchor.maxAboveBuyMetal` | number | `0.66` | Flat allowance in ref over the buy, so cheap items keep a weapon-or-two spread |
 | `sellAnchor.maxAboveBaselinePct` | number | `0.25` | The cap is at least this fraction over the bptf community sell, when there is one |
 | `sellOnly.maxAskWithoutBidsMetal` | number | `1` | With no bids at all, an item is priced from the ask alone (buy 0.05) only when the ask is at most this many ref |
+| `marketModel.supportPct` | number | `0.05` | A bid is supported when enough bids sit within this fraction of it |
+| `marketModel.minSupport` | number | `2` | How many bids (itself included) must sit within `supportPct` of a bid to support it |
+| `marketModel.askProximityPct` | number | `0.1` | A bid within this fraction under the market ask is supported on its own (the two sides agree) |
+| `marketModel.lockTolerancePct` | number | `0.05` | Bids up to this fraction over the ask are a locked market; higher ones are dropped as painted/spelled variants |
+| `baselineCheck.skipWhenListingsAtLeast.buy` / `.sell` | number | `5` / `3` | With at least this many bids and asks the bptf baseline check is skipped |
+| `baselineCheck.skipWhenListingsAtLeast.total` | number | `5` | The baseline check is also skipped with 2+ bids, an ask, at least this many listings in all, and the ask within `maxAskToBidRatio` of the bid |
+
+How the market is read (`modules/marketPrice.js`): the buy price is the best *supported* bid - the highest bid that another bid within `supportPct` backs, or that sits within `askProximityPct` under the ask - so a lone bid far above the pack is not copied and a crowd of lowballers does not drag the buy down. When the best bid meets the lowest ask (a locked market) the sell is the first ask above the best bid, or the best bid plus `minSellMargin` / `minSellMarginPercent` when there is none. Items that did not price in a cycle (baseline rejection, swing hold, error) are still checked against the live market: a sell under the best bid is raised and a buy over the market sell is lowered (`modules/priceGuard.js`).
 
 `sellAnchor` stops the pricer copying an ask side made of bots parked at an absurd price: with enough bids, the sell is capped at the highest of buy × (1 + `maxAboveBuyPct`), buy + `maxAboveBuyMetal` and the bptf community sell × (1 + `maxAboveBaselinePct`), rounded down to a whole weapon. `sellOnly.maxAskWithoutBidsMetal` keeps an item that momentarily has no bids on its last price instead of pricing it 0.05 / ask; the no-bid rule is meant for junk that trades at a weapon or two.
 

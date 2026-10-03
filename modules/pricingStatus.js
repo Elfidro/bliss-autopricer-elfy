@@ -5,7 +5,9 @@
 
 const statusByName = new Map();
 
-// status: 'updated' | 'rejected' | 'swing-held' | 'swing-confirmed' | 'error'
+// status: 'updated' | 'rejected' | 'swing-held' | 'swing-confirmed' | 'guarded' | 'error'
+// ('guarded': the item did not price, but its old price crossed the market and
+// the crossing guard moved it, see modules/priceGuard.js)
 function recordStatus(name, status, reason = '') {
   statusByName.set(name, { status, reason, at: Date.now() });
 }
@@ -33,7 +35,10 @@ function shortReason(message) {
       return label;
     }
   }
-  return msg.replace(/^Error:\s*/, '').replace(/\| UPDATING PRICES \|:\s*/g, '').slice(0, 120);
+  return msg
+    .replace(/^Error:\s*/, '')
+    .replace(/\| UPDATING PRICES \|:\s*/g, '')
+    .slice(0, 120);
 }
 
 module.exports = { recordStatus, getStatus, shortReason };

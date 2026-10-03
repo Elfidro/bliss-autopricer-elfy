@@ -59,7 +59,7 @@ Visit the web interface at `http://localhost:3000` to manage your pricing!
 - **💰 Steam Community Market Integration**: SCM fallback pricing for rare/illiquid items
 - **🎪 Unusual Support**: Full pricing support for unusual items and special attributes
 - **🛡️ Profit Protection**: Configurable margins and sanity checks
-- **🔍 Outlier Detection**: Automatic filtering of suspicious listings
+- **🔍 Robust Market Reading**: Isolated undercut asks, lone outlying bids and painted-variant bids are ignored; locked markets sell at the next ask
 
 ### Advanced Bot Management
 

@@ -19,7 +19,8 @@
   "baselineCheck": {
     "skipWhenListingsAtLeast": {
       "buy": 5,
-      "sell": 3
+      "sell": 3,
+      "total": 5
     }
   },
   "minSellMargin": 0.11,
@@ -28,6 +29,12 @@
   "ownBotSteamIDs": [],
   "isolatedAskGap": 0.25,
   "maxAskToBidRatio": 3,
+  "marketModel": {
+    "lockTolerancePct": 0.05,
+    "supportPct": 0.05,
+    "minSupport": 2,
+    "askProximityPct": 0.1
+  },
   "sellAnchor": {
     "enabled": true,
     "minBids": 3,

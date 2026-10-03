@@ -10,9 +10,21 @@ const { getStatus } = require('../pricingStatus');
 const STATES = {
   overpay: { label: 'Overpaying', badge: 'danger', help: 'Buy price is above the market ask' },
   underprice: { label: 'Underpriced', badge: 'danger', help: 'Sell price is below the best bid' },
-  'too-wide': { label: 'Too wide', badge: 'warn', help: 'Sell above the ask and buy under the bid' },
-  'sell-high': { label: 'Sell high', badge: 'warn', help: 'Sell more than 3% above the market ask' },
-  'buy-low': { label: 'Buy low', badge: 'warn', help: 'Buy more than 5% under the best bid' },
+  'too-wide': {
+    label: 'Too wide',
+    badge: 'warn',
+    help: 'Sell above the ask and buy under the bid',
+  },
+  'sell-high': {
+    label: 'Sell high',
+    badge: 'warn',
+    help: 'Sell more than 2% (min one scrap) above the market ask',
+  },
+  'buy-low': {
+    label: 'Buy low',
+    badge: 'warn',
+    help: 'Buy more than 2% (min one scrap) under the best bid',
+  },
   ok: { label: 'On market', badge: 'ok', help: 'Buy near the best bid, sell near the market ask' },
   'no-market': { label: 'No market', badge: 'muted', help: 'Not enough live listings to judge' },
 };
@@ -29,7 +41,9 @@ function profitOf(trades, keyPrice) {
       total += their.total / 9 - our.total / 9;
     } else {
       total +=
-        (their.keys || 0) * keyPrice + (their.metal || 0) - ((our.keys || 0) * keyPrice + (our.metal || 0));
+        (their.keys || 0) * keyPrice +
+        (their.metal || 0) -
+        ((our.keys || 0) * keyPrice + (our.metal || 0));
     }
   }
   return total;
@@ -44,7 +58,9 @@ function loadTrades(configManager) {
       return [];
     }
     const owners = new Set(getBaseConfigManager().getConfig().botOwnerSteamIDs || []);
-    return Object.values(pollData.offerData).filter((t) => t.isAccepted && !(t.partner && owners.has(t.partner)));
+    return Object.values(pollData.offerData).filter(
+      (t) => t.isAccepted && !(t.partner && owners.has(t.partner))
+    );
   } catch (error) {
     console.log('Could not load polldata.json:', error.message || error);
     return [];
@@ -69,7 +85,8 @@ module.exports = function (app, configManager) {
       const rank = Object.keys(STATES);
       rows.sort(
         (a, b) =>
-          rank.indexOf(a.state) - rank.indexOf(b.state) || Math.abs(b.errPct || 0) - Math.abs(a.errPct || 0)
+          rank.indexOf(a.state) - rank.indexOf(b.state) ||
+          Math.abs(b.errPct || 0) - Math.abs(a.errPct || 0)
       );
 
       const accuracy = pct(s.ok, s.withMarket);
@@ -136,9 +153,9 @@ module.exports = function (app, configManager) {
             <div class="stat-value">${accuracy}%</div>
             <p class="stat-desc">${s.ok} of ${s.withMarket} items with a live market</p>
           </div>
-          <div class="stat-card ${s.medianErrPct != null && s.medianErrPct <= 5 ? 'stat-ok' : 'stat-warn'}">
+          <div class="stat-card ${s.medianErrPct !== null && s.medianErrPct <= 5 ? 'stat-ok' : 'stat-warn'}">
             <div class="stat-top"><span class="stat-title">Median error</span><div class="stat-icon-wrapper">📏</div></div>
-            <div class="stat-value">${s.medianErrPct == null ? '—' : s.medianErrPct + '%'}</div>
+            <div class="stat-value">${s.medianErrPct === null ? '—' : s.medianErrPct + '%'}</div>
             <p class="stat-desc">Our mid-price vs the market mid-price</p>
           </div>
           <div class="stat-card ${danger === 0 ? 'stat-ok' : 'stat-danger'}">
@@ -180,7 +197,7 @@ module.exports = function (app, configManager) {
             <div style="margin-top: 14px; font-size: 0.82rem; color: var(--text-muted);">
               Last cycle: ${lastRuns.updated || 0} updated, ${lastRuns.rejected || 0} rejected,
               ${lastRuns['swing-held'] || 0} held by swing guard, ${lastRuns['swing-confirmed'] || 0} large moves accepted,
-              ${lastRuns.error || 0} errors.
+              ${lastRuns.guarded || 0} crossings fixed by the guard, ${lastRuns.error || 0} errors.
             </div>
           </div>
         </div>
@@ -242,7 +259,7 @@ module.exports = function (app, configManager) {
         const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         const fmt = (v) => (v == null ? '—' : Number(v).toFixed(2));
         const age = (sec) => sec < 3600 ? Math.round(sec / 60) + 'm' : sec < 86400 ? Math.round(sec / 3600) + 'h' : Math.round(sec / 86400) + 'd';
-        const RUN = { updated: 'Updated', rejected: 'Rejected', 'swing-held': 'Held', 'swing-confirmed': 'Move accepted', error: 'Error' };
+        const RUN = { updated: 'Updated', rejected: 'Rejected', 'swing-held': 'Held', 'swing-confirmed': 'Move accepted', guarded: 'Guarded', error: 'Error' };
 
         function renderChips() {
           const counts = {};
@@ -357,7 +374,12 @@ module.exports = function (app, configManager) {
       console.error('Dashboard error:', error);
       res
         .status(500)
-        .send(renderPage('Error', '<div class="flash flash-error">Error loading dashboard: ' + error.message + '</div>'));
+        .send(
+          renderPage(
+            'Error',
+            '<div class="flash flash-error">Error loading dashboard: ' + error.message + '</div>'
+          )
+        );
     }
   });
 };

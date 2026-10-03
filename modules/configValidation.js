@@ -22,9 +22,13 @@ const DEFAULTS = {
     sell: -25,
   },
   // The band above is only applied to thin markets; with at least this many
-  // bids and asks the market price is used as is.
+  // bids and asks the market price is used as is. It is also skipped when the
+  // market is self-consistent: 2+ bids, an ask, at least `total` listings in
+  // all, and the ask within maxAskToBidRatio of the best bid. The baseline
+  // lags by months (median entry 165 days old), and a one-ask market never met
+  // the buy/sell rule, so items such as Aristocravat were rejected for hours.
   baselineCheck: {
-    skipWhenListingsAtLeast: { buy: 5, sell: 3 },
+    skipWhenListingsAtLeast: { buy: 5, sell: 3, total: 5 },
   },
   alwaysQuerySnapshotAPI: false,
   fallbackOntoPricesTf: false,
@@ -67,6 +71,17 @@ const DEFAULTS = {
   // when the next ask is further above the bid than this, the asks above are
   // the outliers and the low ask stands.
   maxAskToBidRatio: 3,
+  // How the bids are read (modules/marketPrice.js chooseMarket). The buy is
+  // the highest bid backed by at least minSupport bids within supportPct of
+  // it, or within askProximityPct under the ask; a lone bid far above the pack
+  // is not copied. Bids up to lockTolerancePct over the ask are a locked
+  // market (sell at the next ask above the bid), not a painted variant.
+  marketModel: {
+    lockTolerancePct: 0.05,
+    supportPct: 0.05,
+    minSupport: 2,
+    askProximityPct: 0.1,
+  },
   // The sell follows the ask, but the ask is not always a market: when every
   // seller is a bot parked at an absurd price there is no undercut to skip,
   // and the pricer copied the herd (The Triple Jumper sold at 52 ref against

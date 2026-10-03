@@ -2,35 +2,43 @@
 // (the websocket mirror), so the pricer's accuracy can be tracked over time
 // without polling backpack.tf.
 //
-// For each priced item:
-//   ask = the market ask: the lowest sell listing, or the next one up when the
-//         lowest is an isolated undercut (chooseAskIndex, the same rule the
-//         pricer sells by)
-//   bid = highest buy order at or below the ask (buy orders above it are for
-//         painted/spelled variants, not the base item)
+// For each priced item the market is read with chooseMarket, the same model the
+// pricer prices by (modules/marketPrice.js), so the scorer and the pricer never
+// disagree about where the market is:
+//   bid = the supported best bid among the real bids (buy orders far above
+//         the ask are for painted/spelled variants, not the base item)
+//   ask = where the market sells: the market ask (the lowest sell listing, or
+//         the next one up when the lowest is an isolated undercut), or, when
+//         the market is locked (best bid >= ask), the first ask above the best
+//         bid. A locked row is flagged with `locked`.
 // and the pricer's buy/sell are judged against them.
 
 const fs = require('fs');
 const path = require('path');
 const { getBaseConfigManager } = require('./baseConfigManager');
-const { chooseAskIndex } = require('./marketPrice');
+const { chooseMarket, marketOptions } = require('./marketPrice');
 
 const PRICELIST_PATH = path.resolve(__dirname, '../files/pricelist.json');
 
 const toMetal = (c, keyMetal) => (Number(c?.keys) || 0) * keyMetal + (Number(c?.metal) || 0);
 const r2 = (x) => Math.round(x * 100) / 100;
 
-// Tolerances: a sell within 3% (min one scrap) of the lowest ask and a buy
-// within 5% (min two scrap) of the best bid count as on the market.
-const sellTolerance = (ask) => Math.max(0.11, ask * 0.03);
-const buyTolerance = (bid) => Math.max(0.22, bid * 0.05);
+// Tolerances: a sell within 2% (min one scrap) of the market ask and a buy
+// within 2% (min one scrap) of the best bid count as on the market. The buy
+// side used to allow 5% (min two scrap), which scored Backpack Expander's 29
+// ref buy under a 29.88 ref best bid as "ok" on a 30 ref item that trades
+// every few minutes - a buy that never wins an item.
+const sellTolerance = (ask) => Math.max(0.11, ask * 0.02);
+const buyTolerance = (bid) => Math.max(0.11, bid * 0.02);
 
-// Strict comparisons on purpose: in a locked market (bid == ask, common when
-// a buying bot and a selling bot will not trade with each other) the pricer
-// has to sit on one side or the other, so buying at the bid or selling at the
-// ask is on the market, not over/under it.
+const isNil = (v) => v === null || v === undefined;
+
+// Strict comparisons on purpose: in a locked market with no ask above the
+// best bid (bid == ask, common when a buying bot and a selling bot will not
+// trade with each other) the pricer buys at the bid, which is also the ask, so
+// buying at the ask or selling at the bid is on the market, not over/under it.
 function classify(row) {
-  if (row.bid == null || row.ask == null) {
+  if (isNil(row.bid) || isNil(row.ask)) {
     return 'no-market';
   }
   if (row.buy > row.ask) {
@@ -66,7 +74,10 @@ async function computeAccuracy(db) {
     if (own.has(l.steamid)) {
       continue;
     }
-    const price = toMetal(typeof l.currencies === 'string' ? JSON.parse(l.currencies) : l.currencies, keyMetal);
+    const price = toMetal(
+      typeof l.currencies === 'string' ? JSON.parse(l.currencies) : l.currencies,
+      keyMetal
+    );
     if (!(price > 0)) {
       continue;
     }
@@ -79,6 +90,7 @@ async function computeAccuracy(db) {
   }
 
   const now = Date.now() / 1000;
+  const opts = marketOptions(config);
   const rows = [];
   for (const item of pricelist) {
     if (item.sku === '5021;6') {
@@ -86,26 +98,25 @@ async function computeAccuracy(db) {
     }
     const m = market.get(item.name) || market.get('The ' + item.name) || { buy: [], sell: [] };
     const asks = m.sell.slice().sort((a, b) => a - b);
-    const askIndex = chooseAskIndex(asks, m.buy, {
-      gap: config.isolatedAskGap,
-      maxAskToBidRatio: config.maxAskToBidRatio,
-    });
-    const ask = asks.length ? asks[askIndex] : null;
-    const buys = ask == null ? m.buy : m.buy.filter((p) => p <= ask);
-    const bid = buys.length ? Math.max(...buys) : null;
+    const mk = chooseMarket(asks, m.buy, opts);
+    // Where the market sells: the next ask above the best bid when locked,
+    // else the market ask. A locked market with no ask above the bid has no
+    // such price; the market ask stands in for it.
+    const ask = isNil(mk.sell) ? mk.ask : mk.sell;
     const row = {
       name: item.name,
       sku: item.sku,
       buy: r2(toMetal(item.buy, keyMetal)),
       sell: r2(toMetal(item.sell, keyMetal)),
-      bid: bid == null ? null : r2(bid),
-      ask: ask == null ? null : r2(ask),
-      nBuy: buys.length,
+      bid: isNil(mk.bid) ? null : r2(mk.bid),
+      ask: isNil(ask) ? null : r2(ask),
+      locked: mk.locked,
+      nBuy: mk.nBids,
       nSell: m.sell.length,
       ageSec: Math.max(0, Math.round(now - item.time)),
     };
     row.state = classify(row);
-    if (row.bid != null && row.ask != null) {
+    if (!isNil(row.bid) && !isNil(row.ask)) {
       const mid = (row.bid + row.ask) / 2;
       row.errPct = r2((((row.buy + row.sell) / 2 - mid) / mid) * 100);
     } else {
@@ -160,7 +171,18 @@ async function recordAccuracy(db) {
     `INSERT INTO pricer_accuracy
        (items, with_market, ok, overpay, underprice, sell_high, buy_low, too_wide, fresh_1h, median_err)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [s.items, s.withMarket, s.ok, s.overpay, s.underprice, s.sellHigh, s.buyLow, s.tooWide, s.fresh1h, s.medianErrPct]
+    [
+      s.items,
+      s.withMarket,
+      s.ok,
+      s.overpay,
+      s.underprice,
+      s.sellHigh,
+      s.buyLow,
+      s.tooWide,
+      s.fresh1h,
+      s.medianErrPct,
+    ]
   );
   console.log(
     `[ACCURACY] ${s.ok}/${s.withMarket} items on the market (${s.overpay} overpay, ` +
