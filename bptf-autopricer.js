@@ -70,6 +70,7 @@ const { recordStatus, getStatus, shortReason } = require('./modules/pricingStatu
 const { recordAccuracy } = require('./modules/marketAccuracy');
 const { chooseAskIndex, chooseMarket, marketOptions } = require('./modules/marketPrice');
 const { guardPrice } = require('./modules/priceGuard');
+const { pruneStaleEntries } = require('./modules/pricelistPrune');
 const {
   loadAnchors,
   writeAnchorsFile,
@@ -609,6 +610,23 @@ const calculateAndEmitPrices = async () => {
     const filtered = pricelist.items.filter((i) => !updatedSkus.has(i.sku));
     // Add new/updated items
     pricelist.items = [...filtered, ...itemsToWrite];
+    // Drop entries nobody prices any more: names gone from the item list and
+    // leftovers under broken SKUs (modules/pricelistPrune.js). The list rule
+    // is skipped when every item is priced, or when the list came back empty
+    // (a failed item_list.json read must not wipe the pricelist).
+    const allowedNow = getAllowedItemNames();
+    const pruned = pruneStaleEntries(pricelist.items, {
+      allowed: allowAllItems() || !allowedNow || allowedNow.size === 0 ? null : allowedNow,
+      resolveSku: (n) => schemaManager.schema.getSkuFromName(n),
+    });
+    const removed = pruned.notAllowed + pruned.brokenSku;
+    if (removed > 0) {
+      pricelist.items = pruned.items;
+      console.log(
+        `[PRUNE] removed ${removed} stale pricelist entries (${pruned.notAllowed} not in item list, ` +
+          `${pruned.brokenSku} broken sku)`
+      );
+    }
     // Write back to file
     fs.writeFileSync(PRICELIST_PATH, JSON.stringify(pricelist, null, 2), 'utf8');
   } catch (err) {
