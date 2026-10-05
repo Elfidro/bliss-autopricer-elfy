@@ -73,9 +73,11 @@ function chooseAskIndex(asks, bids = [], opts = {}) {
 // and 2.88 under a 19.33 ask and was bought at 12.38. Cigarillo Caballero had
 // two bidders at 43.33 and was bought at 36.05. For a buyer the relevant number
 // is the best bid that is not a one-off, so a bid counts when
-//   - at least `minSupport` bids (itself included) are within `supportPct` of
-//     it: two bidders at 43.33 (Cigarillo), or 24.44 with 24.33 behind it
-//     (Slumber Slacks), or
+//   - at least `minSupport` bids (itself included) are within `supportPct`
+//     of it, or within `supportMetal` (one scrap) on cheap items where a 5%
+//     band is less than one price step: two bidders at 43.33 (Cigarillo),
+//     24.44 with 24.33 behind it (Slumber Slacks), Tin-1000's 1.66 with 1.55
+//     behind it (5% of 1.66 is 0.08, so it used to buy at 1.55), or
 //   - it sits within `askProximityPct` under the ask, i.e. the two sides agree
 //     on the price: Standing Offer's lone 19.22 is 1% under the 19.33 ask.
 // A lone bid far above the pack and far under the ask is not copied: The
@@ -102,6 +104,7 @@ function robustBestBid(bids, ask, opts = {}) {
     return null;
   }
   const supportPct = num(opts.supportPct, 0.05);
+  const supportMetal = num(opts.supportMetal, 0.11);
   const minSupport = num(opts.minSupport, 2);
   const proximity = num(opts.askProximityPct, 0.1);
   const hasAsk = Number.isFinite(ask) && ask > 0 && opts.askCredible !== false;
@@ -110,7 +113,9 @@ function robustBestBid(bids, ask, opts = {}) {
     if (hasAsk && bid >= ask * (1 - proximity)) {
       return bid;
     }
-    const floor = bid * (1 - supportPct);
+    // Half a cent of slack: prices are written to 2 dp, so one scrap under
+    // 1.55 is 1.44 although 1.55 - 0.11 computes as 1.4400000000000002.
+    const floor = bid - Math.max(bid * supportPct, supportMetal) - 0.005;
     let support = 0;
     for (const b of list) {
       if (b < floor) {
@@ -275,6 +280,7 @@ function marketOptions(config = {}) {
     lockTolerancePct: m.lockTolerancePct,
     lockedNextAskMaxPct: m.lockedNextAskMaxPct,
     supportPct: m.supportPct,
+    supportMetal: m.supportMetal,
     minSupport: m.minSupport,
     askProximityPct: m.askProximityPct,
   };

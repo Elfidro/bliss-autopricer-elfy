@@ -76,6 +76,8 @@ const {
   writeAnchorsFile,
   ensureIndex: ensureAnchorIndex,
   rampCap,
+  sellFloor,
+  floorSell,
 } = require('./modules/historyAnchor');
 const { anchorSell, SELL_ANCHOR_DEFAULTS } = require('./modules/sellAnchor');
 const { priceKeyFromListings } = require('./modules/keyMarketPrice');
@@ -139,7 +141,7 @@ const updatedSkus = new Set();
 // query failed, which turns every anchor rule off.
 let cycleAnchors = new Map();
 // Per-cycle counts for the one [ANCHOR] summary line.
-const anchorStats = { rampCapped: 0, droppedAboveAnchor: 0 };
+const anchorStats = { rampCapped: 0, sellFloored: 0, droppedAboveAnchor: 0 };
 
 // sku -> consecutive cycles a price move has been held back by the swing guard.
 // Persisted to disk: the guard needs confirmCycles consecutive holds before it
@@ -510,6 +512,7 @@ const calculateAndEmitPrices = async () => {
     }
   }
   anchorStats.rampCapped = 0;
+  anchorStats.sellFloored = 0;
   anchorStats.droppedAboveAnchor = 0;
 
   // Only use items added through GUI or item_list.json
@@ -585,8 +588,9 @@ const calculateAndEmitPrices = async () => {
 
   const windowHours = Number(config.historyAnchor?.windowHours) || 24;
   console.log(
-    `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.droppedAboveAnchor} bids ` +
-      `dropped above the ${windowHours} h anchor (${cycleAnchors.size} SKUs anchored)`
+    `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.sellFloored} sells ` +
+      `ramp-floored, ${anchorStats.droppedAboveAnchor} bids dropped above the ${windowHours} h ` +
+      `anchor (${cycleAnchors.size} SKUs anchored)`
   );
 
   // Items that did not price this cycle keep their old price; make sure that
@@ -1424,6 +1428,31 @@ const getAverages = async (
       }
     }
 
+    // Sell ramp floor, the mirror of the buy ramp: the sell may fall at most
+    // maxSellDropPct (or maxSellDropMetal) under our own 24 h median sell,
+    // and never to or under the buy (modules/historyAnchor.js). Without it
+    // only the swing guard's four-cycle hold stood between three fake cheap
+    // asks and our stock being sold to the lister cheap. Only on a real ask:
+    // the sell-only, placeholder and locked-margin sells are derived from the
+    // bids/ask already.
+    let floorNote = '';
+    if (!sellOnly && sellFiltered.length > 0 && market.sellFrom !== 'margin') {
+      const floor = sellFloor(anchor, config.historyAnchor);
+      const askMetal = Methods.toMetal(final_sellObj, keyobj.metal);
+      const floored = floorSell(askMetal, Methods.toMetal(final_buyObj, keyobj.metal), floor);
+      if (floored.floored) {
+        final_sellObj =
+          sku === '5021;6' ? { keys: 0, metal: floored.sell } : metalToCurrencies(floored.sell);
+        anchorStats.sellFloored++;
+        const h = config.historyAnchor || {};
+        const dropPct = Math.round(Number(h.maxSellDropPct ?? 0.25) * 100);
+        const hours = Number(h.windowHours) || 24;
+        floorNote =
+          `Sell ramp-floored at -${dropPct}%/${hours === 24 ? 'day' : `${hours} h`}: ` +
+          `market ask ${askMetal} ref, ${hours} h median ${Methods.getRight(anchor.sell)} ref`;
+      }
+    }
+
     var usePrices = false;
     // When the listings agree with each other they are the price, and the bptf
     // community value is not consulted. That value lags badly: the median
@@ -1483,7 +1512,9 @@ const getAverages = async (
         );
       }
       const result = [final_buyObj, final_sellObj];
-      const note = [marketNote, dropNote, rampNote, anchorNote].filter(Boolean).join('; ');
+      const note = [marketNote, dropNote, rampNote, anchorNote, floorNote]
+        .filter(Boolean)
+        .join('; ');
       if (note) {
         result.note = note;
       }

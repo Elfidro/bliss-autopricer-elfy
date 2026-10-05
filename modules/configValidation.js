@@ -80,6 +80,9 @@ const DEFAULTS = {
   marketModel: {
     lockTolerancePct: 0.05,
     supportPct: 0.05,
+    // ...or within this many ref, whichever is wider: on cheap items 5% is
+    // under one scrap (Tin-1000's 1.66 was unsupported by 1.55 bids).
+    supportMetal: 0.11,
     minSupport: 2,
     askProximityPct: 0.1,
     // In a locked market the next ask up is the sell only when it is at most
@@ -107,6 +110,16 @@ const DEFAULTS = {
     maxBidAboveMetal: 0.33,
     maxBuyRisePct: 0.25,
     maxBuyRiseMetal: 0.33,
+    // A buy anchor under this share of the sell anchor came from a sell-only
+    // placeholder, not bids, and gets no ramp cap (Hard Hearing: anchor buy
+    // 4.5 / sell 118.11 held the buy at 5.61 against bids at 64-75 ref).
+    minBuyOfSellPct: 0.5,
+    // The mirror of the buy ramp: the sell may fall at most maxSellDropPct
+    // (or maxSellDropMetal, whichever drop is larger) under the anchor sell,
+    // never to or under the buy. Fake cheap asks would otherwise pull our
+    // sell down within an hour.
+    maxSellDropPct: 0.25,
+    maxSellDropMetal: 0.33,
     // A second, longer median (needs longMinRows rows, a day of cycles). Not
     // used for pricing: it is published with the 24 h one in
     // files/anchors.json for pricelist-ui's inflow guard.

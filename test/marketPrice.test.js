@@ -273,6 +273,24 @@ test('an empty book has no bid and no sell', () => {
   assert.equal(m.sellFrom, 'none');
 });
 
+test('support within one scrap on cheap items', () => {
+  // Tin-1000: 5% of 1.66 is 0.08, under one scrap, so the 1.66 bid used to be
+  // unsupported by the 1.55s and the buy was 1.55.
+  assert.equal(robustBestBid([1.66, 1.55, 1.55], null), 1.66);
+  assert.equal(chooseMarket([2.11, 2.22], [1.66, 1.55, 1.55]).bid, 1.66);
+  // The Birdcage 1.55 / 1.44 and the Winter 2018 case 0.27 / 0.22.
+  assert.equal(robustBestBid([1.55, 1.44], null), 1.55);
+  assert.equal(robustBestBid([0.27, 0.22], null), 0.27);
+  // Two scrap apart is not within one scrap.
+  assert.equal(robustBestBid([1.66, 1.44], null), 1.44);
+  // A 30 ref item: 28 is 6.7% under 30 (more than 5% and more than a scrap),
+  // so 30 is only the bid once a second bidder backs it.
+  assert.equal(robustBestBid([30, 28], null), 28);
+  assert.equal(robustBestBid([30, 29.88, 28], null), 30);
+  // supportMetal comes from the options.
+  assert.equal(robustBestBid([1.66, 1.55], null, { supportMetal: 0.05 }), 1.55);
+});
+
 test('robustBestBid', () => {
   assert.equal(robustBestBid([], 5), null);
   assert.equal(robustBestBid([3], 10), 3);
@@ -298,6 +316,7 @@ test('marketOptions maps the config', () => {
     marketModel: {
       lockTolerancePct: 0.02,
       supportPct: 0.03,
+      supportMetal: 0.22,
       minSupport: 3,
       askProximityPct: 0.05,
       lockedNextAskMaxPct: 0.2,
@@ -313,6 +332,7 @@ test('marketOptions maps the config', () => {
     lockTolerancePct: 0.02,
     lockedNextAskMaxPct: 0.2,
     supportPct: 0.03,
+    supportMetal: 0.22,
     minSupport: 3,
     askProximityPct: 0.05,
   });

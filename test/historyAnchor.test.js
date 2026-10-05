@@ -11,6 +11,8 @@ const {
   rampCap,
   loadAnchors,
   writeAnchorsFile,
+  sellFloor,
+  floorSell,
 } = require('../modules/historyAnchor');
 const { chooseMarket } = require('../modules/marketPrice');
 
@@ -199,6 +201,53 @@ test('a long-only anchor changes nothing in chooseMarket or rampCap', () => {
     [20, 18, 3.33, 3.27, 3.22],
   ];
   assert.deepEqual(chooseMarket(...book, { anchorSell: longOnly.sell }), chooseMarket(...book));
+});
+
+test('Hard Hearing: a placeholder buy history gets no ramp cap', () => {
+  // 24 h anchor buy 4.5 / sell 118.11: the buy history came from a
+  // sell-only placeholder. The ramp held the buy at 5.61 for 27 h.
+  const anchor = { buy: 4.5, sell: 118.11 };
+  assert.equal(rampCap(anchor), null);
+  const m = chooseMarket([115.99, 115.99, 115.99], [75.55, 66.55, 64.55], {
+    anchorSell: anchor.sell,
+  });
+  assert.equal(m.junkAsk, false);
+  assert.equal(m.droppedAboveAnchor, 0);
+  assert.equal(m.bid, 66.55);
+  // A plausible anchor keeps its cap: 60 x 1.25 = 75.
+  assert.equal(rampCap({ buy: 60, sell: 118 }), 75);
+  // The share is configurable.
+  assert.equal(rampCap(anchor, { minBuyOfSellPct: 0 }), 5.61);
+});
+
+test('sell ramp floor: -25%/day, never at or under the buy', () => {
+  const anchor = { buy: 4, sell: 10 };
+  // min(10 x 0.75, 10 - 0.33) = 7.5.
+  const floor = sellFloor(anchor);
+  assert.equal(floor, 7.5);
+  // Fake cheap asks pull the ask to 5: the sell stops at the floor.
+  assert.deepEqual(floorSell(5, 4, floor), { sell: 7.5, floored: true });
+  // An 8% drop is within the band.
+  assert.deepEqual(floorSell(9.2, 4, floor), { sell: 9.2, floored: false });
+  // With the buy at 7.6 the floor would be under buy + one weapon: 7.6 is
+  // 137 weapons, so the sell is 138 weapons = 7.66.
+  assert.deepEqual(floorSell(5, 7.6, floor), { sell: 7.66, floored: true });
+  // No anchor, no floor.
+  assert.deepEqual(floorSell(5, 4, null), { sell: 5, floored: false });
+});
+
+test('sellFloor arithmetic and implausible anchors', () => {
+  assert.equal(sellFloor(null), null);
+  assert.equal(sellFloor({ buy: 3, sell: null }), null);
+  // Cheap item: the 0.33 drop is larger than 25% of 1.11 (1.11 - 0.33 = 0.77).
+  assert.equal(sellFloor({ buy: 0.88, sell: 1.11 }), 0.77);
+  // 25% of 30 is larger than 0.33: 22.5.
+  assert.equal(sellFloor({ buy: 25, sell: 30 }), 22.5);
+  // A sell anchor under the buy anchor is not a market.
+  assert.equal(sellFloor({ buy: 5, sell: 4 }), null);
+  // A floor at or under zero is no floor.
+  assert.equal(sellFloor({ buy: 0.05, sell: 0.22 }), null);
+  assert.equal(sellFloor({ buy: 4, sell: 10 }, { maxSellDropPct: 0.5 }), 5);
 });
 
 test('writeAnchorsFile: atomic write of the rounded anchors', () => {
