@@ -994,7 +994,6 @@ async function guardUnpricedItems(itemNames, itemsToWrite, priceHistoryEntries, 
             buy: Methods.toMetal(entry.buy, keyobj.metal),
             sell: Methods.toMetal(entry.sell, keyobj.metal),
             bid: market.bid,
-            topBid: market.topBidUnderLock,
             // A junk ask (far above our own 24 h sell) is not where the item
             // sells: raising a crossed sell to it would park the item at 49
             // ref. Without it the sell goes one weapon over the best bid.
@@ -1479,21 +1478,17 @@ const getAverages = async (
       }
     }
 
-    // Last: never sell under a real bid (liftSellOverBid), on every path. A
-    // sell under the highest bid within the lock ceiling - even one the
-    // anchor dropped from OUR buy - lets anyone buy ours and flip it into
-    // that bid: El Muchacho sold at 3.00 (anchorSell's 1.6x the 1.88 buy)
-    // under a 14 ref bid.
+    // Last: never sell under a supported bid (liftSellOverBid), on every
+    // path - anyone could buy ours and flip it into that bid. Only the
+    // robust best bid counts: El Muchacho's lone 14 ref bid under a 32 ref
+    // bot herd is not the market, so its 3.00 sell stays.
     let liftNote = '';
-    const lifted = liftSellOverBid(
-      Methods.toMetal(final_sellObj, keyobj.metal),
-      market.topBidUnderLock
-    );
+    const lifted = liftSellOverBid(Methods.toMetal(final_sellObj, keyobj.metal), market.bid);
     if (lifted.lifted) {
       final_sellObj =
         sku === '5021;6' ? { keys: 0, metal: lifted.sell } : metalToCurrencies(lifted.sell);
       anchorStats.sellsLifted++;
-      liftNote = `Sell lifted over the ${market.topBidUnderLock} ref bid`;
+      liftNote = `Sell lifted over the ${market.bid} ref bid`;
     }
 
     var usePrices = false;

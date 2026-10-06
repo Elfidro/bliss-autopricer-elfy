@@ -31,23 +31,21 @@ const EPS = 0.005;
 
 const finitePositive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
-// guardPrice({ buy, sell, bid, topBid, marketSell }, opts) -> null | { buy, sell, reason }
+// guardPrice({ buy, sell, bid, marketSell }, opts) -> null | { buy, sell, reason }
 //   buy, sell   the price the item has now
 //   bid         the supported best bid (chooseMarket(...).bid), or null
-//   topBid      the highest real bid a buyer could flip into
-//               (chooseMarket(...).topBidUnderLock); defaults to `bid`
 //   marketSell  where the market sells (chooseMarket(...).sell: the market ask,
 //               or the next ask up / bid + margin when locked), or null when
 //               there are no asks
 //   opts.minBuyMetal  the smallest buy price (default 0.05, one weapon)
 //
-// - sell under the top bid: raise the sell to the market sell, and at least
-//   a weapon over the top bid (liftSellOverBid, the pricer's rule) and over
-//   the buy.
+// - sell under the supported bid: raise the sell to the market sell, and at
+//   least a weapon over the bid (liftSellOverBid, the pricer's rule) and
+//   over the buy.
 // - buy over the market sell: lower the buy to the best bid, and at most a
 //   weapon under the market sell, never under minBuyMetal.
 // Returns null when there is nothing to fix.
-function guardPrice({ buy, sell, bid, topBid, marketSell } = {}, opts = {}) {
+function guardPrice({ buy, sell, bid, marketSell } = {}, opts = {}) {
   if (!finitePositive(buy) || !finitePositive(sell)) {
     return null;
   }
@@ -73,16 +71,13 @@ function guardPrice({ buy, sell, bid, topBid, marketSell } = {}, opts = {}) {
     }
   }
 
-  const flipBid = finitePositive(topBid) ? Math.max(topBid, hasBid ? bid : 0) : hasBid ? bid : null;
-  const lifted = liftSellOverBid(sell, flipBid);
+  const lifted = liftSellOverBid(sell, hasBid ? bid : null);
   if (lifted.lifted) {
     newSell = Math.max(hasMarketSell ? marketSell : 0, lifted.sell);
     if (!(newSell > newBuy + EPS)) {
       newSell = weaponAbove(newBuy);
     }
-    reasons.push(
-      `sell ${sell} ref was under the ${flipBid} ref best bid, raised to ${newSell} ref`
-    );
+    reasons.push(`sell ${sell} ref was under the ${bid} ref best bid, raised to ${newSell} ref`);
   }
 
   if (reasons.length === 0) {

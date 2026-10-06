@@ -133,7 +133,7 @@ function robustBestBid(bids, ask, opts = {}) {
 // The whole market for an item. `asks` is ascending, `bids` any order, both in
 // metal. Returns
 //   { askIndex, ask, bid, bids, nBids, locked, sell, sellFrom, sellIndex,
-//     bidCeiling, droppedAboveAnchor, junkAsk, topBidUnderLock, clusterSize }
+//     bidCeiling, droppedAboveAnchor, junkAsk, clusterSize }
 // where `ask` is the market ask (chooseAskIndex), `bids` the real bids
 // (descending), `bid` the supported best bid (robustBestBid), and `sell` the
 // price to sell at:
@@ -216,8 +216,6 @@ function chooseMarket(asks, bids, opts = {}) {
       bidCeiling: hasAnchor ? ceilingByAnchor : Infinity,
       droppedAboveAnchor: sortedBids.length - allBids.length,
       junkAsk: false,
-      // No ask, so no lock ceiling: the highest bid of all.
-      topBidUnderLock: sortedBids.length ? sortedBids[0] : null,
       clusterSize: 0,
     };
   }
@@ -234,11 +232,6 @@ function chooseMarket(asks, bids, opts = {}) {
   const askCredible = hasAnchor ? !junkAsk : nextAsk !== undefined && nextAsk <= ask * 1.1;
   let bid = robustBestBid(realBids, ask, { ...opts, askCredible });
   const locked = bid !== null && bid >= ask - 0.005;
-  // The highest bid a buyer could flip our item into: under the lock ceiling
-  // (above it is a painted/spelled variant), but regardless of the anchor
-  // ceiling, which is about what WE pay. See liftSellOverBid.
-  const underLock = sortedBids.filter((b) => b <= lockCeiling);
-  const topBidUnderLock = underLock.length ? underLock[0] : null;
 
   let sell = ask;
   let sellFrom = 'ask';
@@ -292,19 +285,20 @@ function chooseMarket(asks, bids, opts = {}) {
     bidCeiling,
     droppedAboveAnchor,
     junkAsk,
-    topBidUnderLock,
     clusterSize,
   };
 }
 
-// Never sell under a real bid: anyone can buy ours and flip it straight into
-// that bid. El Muchacho had a lone 14 ref bid over a pack at 1.88 and a herd
-// of 14 bot asks at 32.55; the buy is rightly 1.88 (the 14 is unsupported),
-// but anchorSell capped the sell at 3.00 (1.6x the buy), under the 14 ref
-// bid. `topBid` is chooseMarket's topBidUnderLock. A sell under it is lifted
-// to one weapon over it; a sell AT it is left alone (a locked cluster sells
-// with the bidders, see chooseMarket). Shared by the pricer and the crossing
-// guard so the two never disagree.
+// Never sell under a supported bid: anyone could buy ours and flip it
+// straight into that bid. `topBid` is chooseMarket's `bid`, the robust best
+// bid (backed by a second bidder within max(5%, one scrap), or close under a
+// credible ask). A lone bid is not the market, the same reasoning robustBestBid
+// applies on the buy side: El Muchacho had a lone 14 ref bid over a pack at
+// 1.88 and a herd of 14 bot asks at 32.55, nobody buys at those prices, and
+// lifting our 3.00 sell to 14.05 only parked the item. A sell under the
+// supported bid is lifted to one weapon over it; a sell AT it is left alone
+// (a locked cluster sells with the bidders, see chooseMarket). Shared by the
+// pricer and the crossing guard so the two never disagree.
 //   -> { sell, lifted }
 function liftSellOverBid(sell, topBid) {
   if (topBid === null || topBid === undefined || !(sell < topBid - 0.005)) {

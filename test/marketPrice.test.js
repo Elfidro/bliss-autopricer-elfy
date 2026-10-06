@@ -328,32 +328,41 @@ test('locked cluster: several sellers at the bid are the market', () => {
   );
 });
 
-test('El Muchacho: never sell under a real bid', () => {
+test('El Muchacho: a lone bid under a bot herd does not lift the sell', () => {
   // A lone 14 ref bid over a pack at 1.88, and 14 bot asks at 32.55.
   const bids = [14, ...times(1.88, 6), ...times(1.77, 4)];
   const m = chooseMarket(times(32.55, 14), bids);
   assert.equal(m.bid, 1.88, 'the lone 14 is not the buy');
-  assert.equal(m.topBidUnderLock, 14);
   // anchorSell caps the 32.55 herd at 1.6x the buy = 3.00 ...
   const capped = anchorSell({ buyMetal: m.bid, sellMetal: m.sell, nBids: m.nBids });
   assert.equal(capped.sellMetal, 3);
-  // ... which is under the 14 ref bid: lifted one weapon over it.
-  assert.deepEqual(liftSellOverBid(capped.sellMetal, m.topBidUnderLock), {
-    sell: 14.05,
-    lifted: true,
-  });
+  // ... and the lone 14 is not a supported bid, so the sell stays at 3.00.
+  assert.deepEqual(liftSellOverBid(capped.sellMetal, m.bid), { sell: 3, lifted: false });
 });
 
-test('liftSellOverBid leaves a sell at or over the top bid alone', () => {
+test('two bids at 14 and 13.5 under the herd are supported: a sell under them is lifted', () => {
+  const bids = [14, 13.5, ...times(1.88, 6), ...times(1.77, 4)];
+  const m = chooseMarket(times(32.55, 14), bids);
+  // 13.5 is within 5% of 14: the 14 is the supported best bid (and the buy).
+  assert.equal(m.bid, 14);
+  assert.deepEqual(liftSellOverBid(3, m.bid), { sell: 14.05, lifted: true });
+});
+
+test('liftSellOverBid: a sell under two bids that support each other is lifted', () => {
+  // Bids 35 and 34 back each other; a 33 sell under them is a free flip.
+  const m = chooseMarket([36.77, 36.77, 51.11], [35, 34]);
+  assert.equal(m.bid, 35);
+  assert.deepEqual(liftSellOverBid(33, m.bid), { sell: 35.05, lifted: true });
+});
+
+test('liftSellOverBid leaves a sell at or over the bid alone', () => {
   assert.deepEqual(liftSellOverBid(5, 4), { sell: 5, lifted: false });
   assert.deepEqual(liftSellOverBid(4, 4), { sell: 4, lifted: false });
   assert.deepEqual(liftSellOverBid(4, null), { sell: 4, lifted: false });
-  // A bid above the lock ceiling (a painted variant) is not a top bid.
-  assert.equal(chooseMarket([6.33], [12, 5.11, 5.11]).topBidUnderLock, 5.11);
-  // An anchor-dropped bid still counts: it is a bid someone could flip into.
+  // An anchor-dropped (pumped) bid is not the supported bid either.
   const pumped = chooseMarket([49, 50], [20, 18, 3.33, 3.27, 3.22], { anchorSell: 3.5 });
   assert.equal(pumped.bid, 3.33);
-  assert.equal(pumped.topBidUnderLock, 20);
+  assert.deepEqual(liftSellOverBid(5.27, pumped.bid), { sell: 5.27, lifted: false });
 });
 
 test('sell floor only on wide books', () => {
