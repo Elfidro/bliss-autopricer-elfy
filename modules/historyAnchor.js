@@ -57,6 +57,7 @@ const DEFAULTS = {
   minBuyOfSellPct: 0.5,
   maxSellDropPct: 0.25,
   maxSellDropMetal: 0.33,
+  tightMarketPct: 0.25,
 };
 
 function num(v, fallback) {
@@ -207,6 +208,25 @@ function sellFloor(anchor, opts) {
   return floor > 0 ? toWeaponNotation(floor / 18) : null;
 }
 
+// The sell floor only belongs on a wide book. When the market ask is within
+// tightMarketPct of the best bid, or the book is locked, the bids prove the
+// price and a dump cannot profit (our sell never goes under buy + one weapon
+// anyway), so the floor is pure drag: Bullet Buzz (bids 2.22, 2.11 x2; asks
+// 2.22, 2.27 x2, 2.33 x6) glided 3.83 -> 3.44 over hours on a 24 h median
+// polluted by an earlier anchored 6.27 sell. A book without a bid or an ask
+// counts as wide (nothing proves the price). `market` is chooseMarket's
+// result.
+function bookIsWide(market, opts) {
+  if (!market || market.locked) {
+    return false;
+  }
+  if (!(market.ask > 0) || !(market.bid > 0)) {
+    return true;
+  }
+  const o = options(opts);
+  return market.ask > market.bid * (1 + o.tightMarketPct);
+}
+
 // Apply the sell floor: a sell under it is raised to it, but the result is
 // at least one weapon over the buy (a floor under the buy would sell at a
 // loss). -> { sell, floored }
@@ -269,5 +289,6 @@ module.exports = {
   rampCap,
   sellFloor,
   floorSell,
+  bookIsWide,
   HISTORY_ANCHOR_DEFAULTS: DEFAULTS,
 };

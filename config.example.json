@@ -35,7 +35,8 @@
     "supportMetal": 0.11,
     "minSupport": 2,
     "askProximityPct": 0.1,
-    "lockedNextAskMaxPct": 0.25
+    "lockedNextAskMaxPct": 0.25,
+    "lockedClusterMin": 2
   },
   "historyAnchor": {
     "enabled": true,
@@ -49,7 +50,8 @@
     "longMinRows": 96,
     "minBuyOfSellPct": 0.5,
     "maxSellDropPct": 0.25,
-    "maxSellDropMetal": 0.33
+    "maxSellDropMetal": 0.33,
+    "tightMarketPct": 0.25
   },
   "sellAnchor": {
     "enabled": true,

@@ -68,7 +68,12 @@ const { fetchKeyPriceFromPriceDB } = require('./modules/keyPriceUtils');
 const { updateMovingAverages, updateListingStats } = require('./modules/listingAverages');
 const { recordStatus, getStatus, shortReason } = require('./modules/pricingStatus');
 const { recordAccuracy } = require('./modules/marketAccuracy');
-const { chooseAskIndex, chooseMarket, marketOptions } = require('./modules/marketPrice');
+const {
+  chooseAskIndex,
+  chooseMarket,
+  marketOptions,
+  liftSellOverBid,
+} = require('./modules/marketPrice');
 const { guardPrice } = require('./modules/priceGuard');
 const { pruneStaleEntries } = require('./modules/pricelistPrune');
 const {
@@ -78,6 +83,7 @@ const {
   rampCap,
   sellFloor,
   floorSell,
+  bookIsWide,
 } = require('./modules/historyAnchor');
 const { anchorSell, SELL_ANCHOR_DEFAULTS } = require('./modules/sellAnchor');
 const { priceKeyFromListings } = require('./modules/keyMarketPrice');
@@ -141,7 +147,7 @@ const updatedSkus = new Set();
 // query failed, which turns every anchor rule off.
 let cycleAnchors = new Map();
 // Per-cycle counts for the one [ANCHOR] summary line.
-const anchorStats = { rampCapped: 0, sellFloored: 0, droppedAboveAnchor: 0 };
+const anchorStats = { rampCapped: 0, sellFloored: 0, sellsLifted: 0, droppedAboveAnchor: 0 };
 
 // sku -> consecutive cycles a price move has been held back by the swing guard.
 // Persisted to disk: the guard needs confirmCycles consecutive holds before it
@@ -513,6 +519,7 @@ const calculateAndEmitPrices = async () => {
   }
   anchorStats.rampCapped = 0;
   anchorStats.sellFloored = 0;
+  anchorStats.sellsLifted = 0;
   anchorStats.droppedAboveAnchor = 0;
 
   // Only use items added through GUI or item_list.json
@@ -589,7 +596,8 @@ const calculateAndEmitPrices = async () => {
   const windowHours = Number(config.historyAnchor?.windowHours) || 24;
   console.log(
     `[ANCHOR] ${anchorStats.rampCapped} buys ramp-capped, ${anchorStats.sellFloored} sells ` +
-      `ramp-floored, ${anchorStats.droppedAboveAnchor} bids dropped above the ${windowHours} h ` +
+      `ramp-floored, ${anchorStats.sellsLifted} sells lifted over a bid, ` +
+      `${anchorStats.droppedAboveAnchor} bids dropped above the ${windowHours} h ` +
       `anchor (${cycleAnchors.size} SKUs anchored)`
   );
 
@@ -986,6 +994,7 @@ async function guardUnpricedItems(itemNames, itemsToWrite, priceHistoryEntries, 
             buy: Methods.toMetal(entry.buy, keyobj.metal),
             sell: Methods.toMetal(entry.sell, keyobj.metal),
             bid: market.bid,
+            topBid: market.topBidUnderLock,
             // A junk ask (far above our own 24 h sell) is not where the item
             // sells: raising a crossed sell to it would park the item at 49
             // ref. Without it the sell goes one weapon over the best bid.
@@ -1241,6 +1250,11 @@ const getAverages = async (
       if (!sellOnly && market.sellFrom === 'next-ask') {
         picked = sellFiltered[market.sellIndex];
         marketNote = `Locked market: selling at the next ask ${market.sell} ref`;
+      } else if (!sellOnly && market.sellFrom === 'cluster') {
+        // Several sellers at the bid: sell with them (the cluster's highest
+        // ask); the buy is already the model's bid under that ask.
+        picked = sellFiltered[market.sellIndex];
+        marketNote = `Locked cluster: ${market.clusterSize} sellers at the bid, selling with them`;
       } else if (!sellOnly && market.sellFrom === 'margin') {
         picked = null;
         final_sellObj =
@@ -1435,8 +1449,20 @@ const getAverages = async (
     // asks and our stock being sold to the lister cheap. Only on a real ask:
     // the sell-only, placeholder and locked-margin sells are derived from the
     // bids/ask already.
+    //
+    // And only on a wide book (bookIsWide): when the ask is within
+    // tightMarketPct of the bid, or the book is locked, the bids prove the
+    // price and a dump cannot profit - our sell never goes under buy + one
+    // weapon anyway. Bullet Buzz (bids 2.22, 2.11 x2; asks 2.22, 2.27 x2,
+    // 2.33 x6) glided 3.83 -> 3.44 over hours because the floor hung off a
+    // 24 h median polluted by an earlier anchored 6.27 sell.
     let floorNote = '';
-    if (!sellOnly && sellFiltered.length > 0 && market.sellFrom !== 'margin') {
+    if (
+      !sellOnly &&
+      sellFiltered.length > 0 &&
+      market.sellFrom !== 'margin' &&
+      bookIsWide(market, config.historyAnchor)
+    ) {
       const floor = sellFloor(anchor, config.historyAnchor);
       const askMetal = Methods.toMetal(final_sellObj, keyobj.metal);
       const floored = floorSell(askMetal, Methods.toMetal(final_buyObj, keyobj.metal), floor);
@@ -1451,6 +1477,23 @@ const getAverages = async (
           `Sell ramp-floored at -${dropPct}%/${hours === 24 ? 'day' : `${hours} h`}: ` +
           `market ask ${askMetal} ref, ${hours} h median ${Methods.getRight(anchor.sell)} ref`;
       }
+    }
+
+    // Last: never sell under a real bid (liftSellOverBid), on every path. A
+    // sell under the highest bid within the lock ceiling - even one the
+    // anchor dropped from OUR buy - lets anyone buy ours and flip it into
+    // that bid: El Muchacho sold at 3.00 (anchorSell's 1.6x the 1.88 buy)
+    // under a 14 ref bid.
+    let liftNote = '';
+    const lifted = liftSellOverBid(
+      Methods.toMetal(final_sellObj, keyobj.metal),
+      market.topBidUnderLock
+    );
+    if (lifted.lifted) {
+      final_sellObj =
+        sku === '5021;6' ? { keys: 0, metal: lifted.sell } : metalToCurrencies(lifted.sell);
+      anchorStats.sellsLifted++;
+      liftNote = `Sell lifted over the ${market.topBidUnderLock} ref bid`;
     }
 
     var usePrices = false;
@@ -1512,7 +1555,7 @@ const getAverages = async (
         );
       }
       const result = [final_buyObj, final_sellObj];
-      const note = [marketNote, dropNote, rampNote, anchorNote, floorNote]
+      const note = [marketNote, dropNote, rampNote, anchorNote, floorNote, liftNote]
         .filter(Boolean)
         .join('; ');
       if (note) {

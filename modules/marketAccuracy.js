@@ -10,7 +10,9 @@
 //   ask = where the market sells: the market ask (the lowest sell listing, or
 //         the next one up when the lowest is an isolated undercut), or, when
 //         the market is locked (best bid >= ask), the first ask above the best
-//         bid, or the bid plus the sell margin when there is no usable one. A
+//         bid, or the bid plus the sell margin when there is no usable one -
+//         or, when several sellers already sit at the bid (a locked cluster),
+//         the cluster's highest ask, with `bid` the best bid under it. A
 //         locked row is flagged with `locked`.
 // and the pricer's buy/sell are judged against them.
 

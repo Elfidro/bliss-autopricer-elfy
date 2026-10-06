@@ -89,6 +89,10 @@ const DEFAULTS = {
     // this fraction above the best bid, else bid + minSellMargin. A 3x band let
     // Fizzy Pharmacist (bids and asks at 23.33, next ask 49.33) sell at 49.33.
     lockedNextAskMaxPct: 0.25,
+    // ...unless at least this many asks already sit at or under the best bid:
+    // that cluster is the market, so sell with it and buy under it. "Next ask
+    // up" in such books meant Lia almost stopped selling (352 -> 43 a day).
+    lockedClusterMin: 2,
   },
   // A 24 h history anchor (modules/historyAnchor.js): the median of our own
   // buy and sell over the last windowHours, for SKUs with at least minRows
@@ -120,6 +124,10 @@ const DEFAULTS = {
     // sell down within an hour.
     maxSellDropPct: 0.25,
     maxSellDropMetal: 0.33,
+    // The sell floor only applies on a wide book: when the market ask is
+    // within this fraction of the best bid (or the book is locked) the bids
+    // prove the price. Bullet Buzz (bid 2.22, ask 2.27) was held 1.2 ref high.
+    tightMarketPct: 0.25,
     // A second, longer median (needs longMinRows rows, a day of cycles). Not
     // used for pricing: it is published with the 24 h one in
     // files/anchors.json for pricelist-ui's inflow guard.

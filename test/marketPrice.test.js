@@ -9,7 +9,10 @@ const {
   robustBestBid,
   chooseMarket,
   marketOptions,
+  liftSellOverBid,
 } = require('../modules/marketPrice');
+const { anchorSell } = require('../modules/sellAnchor');
+const { sellFloor, floorSell, bookIsWide } = require('../modules/historyAnchor');
 
 const times = (price, n) => Array(n).fill(price);
 
@@ -81,12 +84,12 @@ const BOOKS = [
     locked: true,
   },
   {
-    name: 'Non-Craftable Tour of Duty Ticket: locked at 26',
+    name: 'Non-Craftable Tour of Duty Ticket: seven sellers at the bid, sell with them',
     bids: [26, ...times(25.94, 3), ...times(25.88, 5)],
     asks: [...times(26, 7), 26.22, 26.33],
-    bid: 26,
-    sell: 26.22,
-    sellFrom: 'next-ask',
+    bid: 25.94,
+    sell: 26,
+    sellFrom: 'cluster',
     locked: true,
   },
   {
@@ -240,7 +243,8 @@ test('a variant bid above the lock ceiling is dropped, one a hair over the ask i
 });
 
 test('locked with no ask above the bid: sell a margin over the bid', () => {
-  const m = chooseMarket([1.55, 1.55], times(1.55, 3));
+  // One ask at the bid (two would be a cluster).
+  const m = chooseMarket([1.55], times(1.55, 3));
   assert.equal(m.locked, true);
   assert.equal(m.bid, 1.55);
   assert.equal(m.sell, 1.66);
@@ -291,6 +295,90 @@ test('support within one scrap on cheap items', () => {
   assert.equal(robustBestBid([1.66, 1.55], null, { supportMetal: 0.05 }), 1.55);
 });
 
+test('locked cluster: several sellers at the bid are the market', () => {
+  // Backpack Expander with two sellers at 29.88: sell with them, buy at the
+  // best bid under them.
+  const bids = [...times(29.88, 3), ...times(29.77, 13)];
+  const m = chooseMarket([29.88, 29.88, 30, 30, 30, 30], bids);
+  assert.equal(m.locked, true);
+  assert.equal(m.sellFrom, 'cluster');
+  assert.equal(m.clusterSize, 2);
+  assert.equal(m.sell, 29.88);
+  assert.equal(m.sellIndex, 1);
+  assert.equal(m.bid, 29.77);
+
+  // A single seller at the bid is about to be taken: next ask, as before.
+  const single = chooseMarket([29.88, 30, 30, 30, 30, 30.22], bids);
+  assert.equal(single.sellFrom, 'next-ask');
+  assert.equal(single.clusterSize, 0);
+  assert.equal(single.sell, 30);
+  assert.equal(single.bid, 29.88);
+
+  // No bid under the cluster: 5 - max(0.11, 1%) = 4.89, to a weapon 4.88.
+  const flat = chooseMarket([5, 5, 5], [5, 5, 5]);
+  assert.equal(flat.sellFrom, 'cluster');
+  assert.equal(flat.clusterSize, 3);
+  assert.equal(flat.sell, 5);
+  assert.equal(flat.bid, 4.88);
+
+  // lockedClusterMin from the options.
+  assert.equal(
+    chooseMarket([29.88, 29.88, 30], bids, { lockedClusterMin: 3 }).sellFrom,
+    'next-ask'
+  );
+});
+
+test('El Muchacho: never sell under a real bid', () => {
+  // A lone 14 ref bid over a pack at 1.88, and 14 bot asks at 32.55.
+  const bids = [14, ...times(1.88, 6), ...times(1.77, 4)];
+  const m = chooseMarket(times(32.55, 14), bids);
+  assert.equal(m.bid, 1.88, 'the lone 14 is not the buy');
+  assert.equal(m.topBidUnderLock, 14);
+  // anchorSell caps the 32.55 herd at 1.6x the buy = 3.00 ...
+  const capped = anchorSell({ buyMetal: m.bid, sellMetal: m.sell, nBids: m.nBids });
+  assert.equal(capped.sellMetal, 3);
+  // ... which is under the 14 ref bid: lifted one weapon over it.
+  assert.deepEqual(liftSellOverBid(capped.sellMetal, m.topBidUnderLock), {
+    sell: 14.05,
+    lifted: true,
+  });
+});
+
+test('liftSellOverBid leaves a sell at or over the top bid alone', () => {
+  assert.deepEqual(liftSellOverBid(5, 4), { sell: 5, lifted: false });
+  assert.deepEqual(liftSellOverBid(4, 4), { sell: 4, lifted: false });
+  assert.deepEqual(liftSellOverBid(4, null), { sell: 4, lifted: false });
+  // A bid above the lock ceiling (a painted variant) is not a top bid.
+  assert.equal(chooseMarket([6.33], [12, 5.11, 5.11]).topBidUnderLock, 5.11);
+  // An anchor-dropped bid still counts: it is a bid someone could flip into.
+  const pumped = chooseMarket([49, 50], [20, 18, 3.33, 3.27, 3.22], { anchorSell: 3.5 });
+  assert.equal(pumped.bid, 3.33);
+  assert.equal(pumped.topBidUnderLock, 20);
+});
+
+test('sell floor only on wide books', () => {
+  // Bullet Buzz: bids 2.22, 2.11 x2; asks 2.22, 2.27 x2, 2.33 x6. Locked.
+  const book = chooseMarket([2.22, 2.27, 2.27, ...times(2.33, 6)], [2.22, 2.11, 2.11]);
+  assert.equal(book.sell, 2.27);
+  assert.equal(bookIsWide(book), false);
+  // Even unlocked, 2.27 over a 2.22 bid is tight: no floor off the 4.6 median.
+  assert.equal(bookIsWide({ locked: false, bid: 2.22, ask: 2.27 }), false);
+  const anchor = { buy: 2.2, sell: 4.6 };
+  assert.equal(sellFloor(anchor) > 2.27, true, 'the floor would have dragged the sell up');
+
+  // A wide book: bid 4, fake asks at 5.5 (37% over the bid), median sell 10.
+  assert.equal(bookIsWide({ locked: false, bid: 4, ask: 5.5 }), true);
+  assert.deepEqual(floorSell(5.5, 4, sellFloor({ buy: 6, sell: 10 })), {
+    sell: 7.5,
+    floored: true,
+  });
+  // A 5 ref bid under a 5.5 ask is within 25%: tight, no floor.
+  assert.equal(bookIsWide({ locked: false, bid: 5, ask: 5.5 }), false);
+  // Nothing proves the price without a bid.
+  assert.equal(bookIsWide({ locked: false, bid: null, ask: 5.5 }), true);
+  assert.equal(bookIsWide({ locked: false, bid: 4, ask: 5.5 }, { tightMarketPct: 0.5 }), false);
+});
+
 test('robustBestBid', () => {
   assert.equal(robustBestBid([], 5), null);
   assert.equal(robustBestBid([3], 10), 3);
@@ -320,6 +408,7 @@ test('marketOptions maps the config', () => {
       minSupport: 3,
       askProximityPct: 0.05,
       lockedNextAskMaxPct: 0.2,
+      lockedClusterMin: 3,
     },
   });
   assert.deepEqual(opts, {
@@ -331,6 +420,7 @@ test('marketOptions maps the config', () => {
     marginPct: 0.05,
     lockTolerancePct: 0.02,
     lockedNextAskMaxPct: 0.2,
+    lockedClusterMin: 3,
     supportPct: 0.03,
     supportMetal: 0.22,
     minSupport: 3,

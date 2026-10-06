@@ -133,13 +133,16 @@ function robustBestBid(bids, ask, opts = {}) {
 // The whole market for an item. `asks` is ascending, `bids` any order, both in
 // metal. Returns
 //   { askIndex, ask, bid, bids, nBids, locked, sell, sellFrom, sellIndex,
-//     bidCeiling, droppedAboveAnchor, junkAsk }
+//     bidCeiling, droppedAboveAnchor, junkAsk, topBidUnderLock, clusterSize }
 // where `ask` is the market ask (chooseAskIndex), `bids` the real bids
 // (descending), `bid` the supported best bid (robustBestBid), and `sell` the
 // price to sell at:
 //   sellFrom 'ask'      the market ask (sellIndex = askIndex)
 //   sellFrom 'next-ask' the market is locked, `sell` is the first ask above the
 //                       best bid (sellIndex is its index in `asks`)
+//   sellFrom 'cluster'  locked with lockedClusterMin+ asks at or under the best
+//                       bid: `sell` is the highest of them (sellIndex), `bid`
+//                       the best bid below it; clusterSize counts them
 //   sellFrom 'margin'   locked with no usable ask above the bid: `sell` is the
 //                       bid + max(marginMetal, marginPct of the bid), rounded
 //                       to a weapon (sellIndex -1)
@@ -213,6 +216,9 @@ function chooseMarket(asks, bids, opts = {}) {
       bidCeiling: hasAnchor ? ceilingByAnchor : Infinity,
       droppedAboveAnchor: sortedBids.length - allBids.length,
       junkAsk: false,
+      // No ask, so no lock ceiling: the highest bid of all.
+      topBidUnderLock: sortedBids.length ? sortedBids[0] : null,
+      clusterSize: 0,
     };
   }
 
@@ -226,13 +232,39 @@ function chooseMarket(asks, bids, opts = {}) {
   const junkAsk = hasAnchor && ask > ceilingByAnchor;
   const nextAsk = askList[askIndex + 1];
   const askCredible = hasAnchor ? !junkAsk : nextAsk !== undefined && nextAsk <= ask * 1.1;
-  const bid = robustBestBid(realBids, ask, { ...opts, askCredible });
+  let bid = robustBestBid(realBids, ask, { ...opts, askCredible });
   const locked = bid !== null && bid >= ask - 0.005;
+  // The highest bid a buyer could flip our item into: under the lock ceiling
+  // (above it is a painted/spelled variant), but regardless of the anchor
+  // ceiling, which is about what WE pay. See liftSellOverBid.
+  const underLock = sortedBids.filter((b) => b <= lockCeiling);
+  const topBidUnderLock = underLock.length ? underLock[0] : null;
 
   let sell = ask;
   let sellFrom = 'ask';
   let sellIndex = askIndex;
+  let clusterSize = 0;
   if (locked) {
+    // Several sellers already at or under the best bid: they are the market.
+    // "Sell at the next ask up" then means never selling - Lia sold 352/398/
+    // 222 items a day before the locked-market rule and 83/42/43 after, with
+    // 176 books locked. Sell with the cluster (its highest ask, the price a
+    // buyer gets it for) and buy at the best bid below that. A single ask at
+    // the bid is a seller meeting the bidders who is about to be taken, so it
+    // keeps the next-ask / margin rule.
+    const clusterMin = num(opts.lockedClusterMin, 2);
+    clusterSize = askList.filter((a) => a <= bid + 0.005).length;
+    if (clusterSize < clusterMin) {
+      clusterSize = 0;
+    }
+  }
+  if (locked && clusterSize > 0) {
+    sellIndex = askList.reduce((last, a, i) => (a <= bid + 0.005 ? i : last), -1);
+    sell = askList[sellIndex];
+    sellFrom = 'cluster';
+    const below = realBids.find((b) => b < sell - 0.005);
+    bid = below !== undefined ? below : toWeaponNotation(sell - Math.max(0.11, sell * 0.01));
+  } else if (locked) {
     const band = num(opts.lockedNextAskMaxPct, 0.25);
     sellIndex = askList.findIndex((a) => a > bid + 0.005);
     if (sellIndex >= 0 && askList[sellIndex] <= bid * (1 + band)) {
@@ -260,7 +292,25 @@ function chooseMarket(asks, bids, opts = {}) {
     bidCeiling,
     droppedAboveAnchor,
     junkAsk,
+    topBidUnderLock,
+    clusterSize,
   };
+}
+
+// Never sell under a real bid: anyone can buy ours and flip it straight into
+// that bid. El Muchacho had a lone 14 ref bid over a pack at 1.88 and a herd
+// of 14 bot asks at 32.55; the buy is rightly 1.88 (the 14 is unsupported),
+// but anchorSell capped the sell at 3.00 (1.6x the buy), under the 14 ref
+// bid. `topBid` is chooseMarket's topBidUnderLock. A sell under it is lifted
+// to one weapon over it; a sell AT it is left alone (a locked cluster sells
+// with the bidders, see chooseMarket). Shared by the pricer and the crossing
+// guard so the two never disagree.
+//   -> { sell, lifted }
+function liftSellOverBid(sell, topBid) {
+  if (topBid === null || topBid === undefined || !(sell < topBid - 0.005)) {
+    return { sell, lifted: false };
+  }
+  return { sell: toWeaponNotation((Math.round(topBid * 18) + 1) / 18), lifted: true };
 }
 
 // chooseMarket options from the pricer config (config.json keys
@@ -279,6 +329,7 @@ function marketOptions(config = {}) {
     marginPct: config?.minSellMarginPercent,
     lockTolerancePct: m.lockTolerancePct,
     lockedNextAskMaxPct: m.lockedNextAskMaxPct,
+    lockedClusterMin: m.lockedClusterMin,
     supportPct: m.supportPct,
     supportMetal: m.supportMetal,
     minSupport: m.minSupport,
@@ -286,4 +337,4 @@ function marketOptions(config = {}) {
   };
 }
 
-module.exports = { chooseAskIndex, robustBestBid, chooseMarket, marketOptions };
+module.exports = { chooseAskIndex, robustBestBid, chooseMarket, marketOptions, liftSellOverBid };

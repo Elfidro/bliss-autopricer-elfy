@@ -2,6 +2,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { guardPrice } = require('../modules/priceGuard');
 
+test('lifts a sell under a higher real bid the same way the pricer does', () => {
+  // El Muchacho: buy 1.88, sell 3.00, a lone 14 ref bid under the lock ceiling.
+  const fix = guardPrice({ buy: 1.88, sell: 3, bid: 1.88, topBid: 14, marketSell: null });
+  assert.equal(fix.buy, 1.88);
+  assert.equal(fix.sell, 14.05);
+  assert.match(fix.reason, /under the 14 ref best bid/);
+  // Selling at the top bid is not a crossing.
+  assert.equal(guardPrice({ buy: 1.88, sell: 14, bid: 1.88, topBid: 14 }), null);
+});
+
 test('raises a sell that is under the best bid to the market sell', () => {
   // Aristocravat: pricelist 3.5 / 3.83, bids at 5.11, one ask at 6.33.
   const fix = guardPrice({ buy: 3.5, sell: 3.83, bid: 5.11, marketSell: 6.33 });
