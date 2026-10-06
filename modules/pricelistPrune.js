@@ -41,6 +41,12 @@ function pruneStaleEntries(items, { allowed = null, resolveSku = () => null } = 
     let resolved = null;
     try {
       resolved = resolveSku(entry.name) || null;
+      // A resolver working from a stale schema answers "null;6" for items it
+      // does not know (every item newer than the cached schema): that is not a
+      // resolution, so it must never prune a live entry.
+      if (resolved && String(resolved).includes('null')) {
+        resolved = null;
+      }
     } catch {
       resolved = null;
     }

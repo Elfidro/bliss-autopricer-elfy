@@ -85,3 +85,16 @@ test('keeps the key whatever the list says, and allowed=null skips the list rule
   const all = pruneStaleEntries(items, { allowed: null, resolveSku });
   assert.equal(all.items.length, 2);
 });
+
+test('a name the resolver cannot place (a "null" sku from a stale schema) never prunes an entry', () => {
+  const items = [
+    { name: 'Alpine Apparel', sku: '31583;6', buy: {}, sell: {} },
+    { name: 'Broken', sku: 'null;6', buy: {}, sell: {} },
+  ];
+  const out = pruneStaleEntries(items, {
+    allowed: new Set(['Alpine Apparel', 'Broken']),
+    resolveSku: () => 'null;6',
+  });
+  assert.deepEqual(out.items.map((i) => i.sku), ['31583;6']);
+  assert.equal(out.brokenSku, 1);
+});
