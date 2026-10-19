@@ -823,32 +823,51 @@ module.exports = function (app, config, configManager) {
             }
           }
           
+          // Read every row once. Reading innerText per row on each keystroke forced
+          // a layout per row (thousands of rows), which made typing lag.
+          function cellText(row, sel) {
+            const el = row.querySelector(sel);
+            return el ? el.textContent.replace(/\\s+/g, ' ').trim().toLowerCase() : '';
+          }
+          const filterRowCache = Array.from(document.querySelectorAll('tbody tr')).map(function(row) {
+            return {
+              row: row,
+              name: cellText(row, '.name'),
+              sku: cellText(row, '.sku'),
+              inb: row.dataset.inbot === 'true',
+              age: parseInt(row.dataset.age) || 0,
+              shown: row.style.display !== 'none'
+            };
+          });
+
           function filterRows() {
             const s = document.getElementById('search').value.toLowerCase();
             const fNot = document.getElementById('filter-notinbot').checked;
             const f2h = document.getElementById('filter-2h').checked;
             const f1d = document.getElementById('filter-1d').checked;
             const f3d = document.getElementById('filter-3d').checked;
-            
-            let visibleCount = 0;
-            document.querySelectorAll('tbody tr').forEach(function(row) {
-              const name = (row.querySelector('.name')?.innerText || '').toLowerCase();
-              const sku = (row.querySelector('.sku')?.innerText || '').toLowerCase();
-              const inb = row.dataset.inbot === 'true';
-              const age = parseInt(row.dataset.age) || 0;
-              
-              let ok = name.includes(s) || sku.includes(s);
-              if (ok && fNot && inb) ok = false;
-              if (ok && f2h && age < 3600 * 2) ok = false;
-              if (ok && f1d && age < 3600 * 24) ok = false;
-              if (ok && f3d && age < 3600 * 72) ok = false;
-              
-              row.style.display = ok ? '' : 'none';
-              if (ok) visibleCount++;
-            });
+
+            for (let i = 0; i < filterRowCache.length; i++) {
+              const r = filterRowCache[i];
+              let ok = r.name.includes(s) || r.sku.includes(s);
+              if (ok && fNot && r.inb) ok = false;
+              if (ok && f2h && r.age < 3600 * 2) ok = false;
+              if (ok && f1d && r.age < 3600 * 24) ok = false;
+              if (ok && f3d && r.age < 3600 * 72) ok = false;
+
+              // Only touch rows whose visibility actually changes.
+              if (ok !== r.shown) {
+                r.row.style.display = ok ? '' : 'none';
+                r.shown = ok;
+              }
+            }
           }
-          
-          document.getElementById('search').addEventListener('input', filterRows);
+
+          let searchTimer = null;
+          document.getElementById('search').addEventListener('input', function() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(filterRows, 120);
+          });
           document.querySelectorAll('.filter').forEach(cb => cb.addEventListener('change', filterRows));
           refreshQueue();
           filterRows();
